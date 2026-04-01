@@ -131,6 +131,32 @@ app.post("/api/policies/create/:userId", (req, res) => {
   return res.status(201).json(policy);
 });
 
+app.post("/api/policies/:policyId/activate", (req, res) => {
+  const { policyId } = req.params;
+  const updated = updateDB((db) => {
+    const policy = db.policies.find((p) => p.id === policyId);
+    if (!policy) return null;
+    policy.status = "Active";
+    policy.updatedAt = now();
+    return policy;
+  });
+  if (!updated) return res.status(404).json({ error: "Policy not found." });
+  return res.json(updated);
+});
+
+app.post("/api/policies/:policyId/deactivate", (req, res) => {
+  const { policyId } = req.params;
+  const updated = updateDB((db) => {
+    const policy = db.policies.find((p) => p.id === policyId);
+    if (!policy) return null;
+    policy.status = "Inactive";
+    policy.updatedAt = now();
+    return policy;
+  });
+  if (!updated) return res.status(404).json({ error: "Policy not found." });
+  return res.json(updated);
+});
+
 app.patch("/api/policies/:policyId/status", (req, res) => {
   const { policyId } = req.params;
   const { status } = req.body;
@@ -305,6 +331,21 @@ app.get("/api/triggers/latest/:city", (req, res) => {
   return res.json(latest ?? null);
 });
 
+app.get("/api/triggers", (_req, res) => {
+  const db = readDB();
+  const triggers = [...db.triggers].sort((a, b) => (a.triggeredAt < b.triggeredAt ? 1 : -1));
+  return res.json(triggers);
+});
+
+app.get("/api/claims", (req, res) => {
+  const { userId } = req.query;
+  const db = readDB();
+  const claims = db.claims
+    .filter((c) => (userId ? c.userId === userId : true))
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return res.json(claims);
+});
+
 app.get("/api/claims/:userId", (req, res) => {
   const { userId } = req.params;
   const db = readDB();
@@ -321,6 +362,22 @@ app.get("/api/fraud/:userId", (req, res) => {
   return res.json({
     userId,
     latestFraudScore: latest?.fraudScore ?? 0,
+    status: latest?.fraudStatus ?? "Fraud Check Passed",
+    signalSummary:
+      latest?.fraudScore > 0.75
+        ? "Location/device/claim pattern anomaly detected."
+        : "No suspicious claim pattern detected."
+  });
+});
+
+app.get("/api/fraud-check/:userId", (req, res) => {
+  const { userId } = req.params;
+  const db = readDB();
+  const claims = db.claims.filter((c) => c.userId === userId);
+  const latest = claims.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
+  return res.json({
+    userId,
+    fraudScore: latest?.fraudScore ?? 0,
     status: latest?.fraudStatus ?? "Fraud Check Passed",
     signalSummary:
       latest?.fraudScore > 0.75
@@ -350,6 +407,33 @@ app.get("/api/admin/overview", (_req, res) => {
       riskScore: db.policies.find((p) => p.userId === u.id)?.riskScore ?? 0
     }))
   });
+});
+
+app.get("/api/admin/stats", (_req, res) => {
+  const db = readDB();
+  const approved = db.claims.filter((c) => c.status === "Approved");
+  const underReview = db.claims.filter((c) => c.status === "Pending");
+  const totalPayout = approved.reduce((sum, c) => sum + c.payoutAmount, 0);
+
+  return res.json({
+    users: db.users.length,
+    activePolicies: db.policies.filter((p) => p.status === "Active").length,
+    totalClaims: db.claims.length,
+    underReview: underReview.length,
+    totalPayout: Number(totalPayout.toFixed(2))
+  });
+});
+
+app.get("/api/admin/risk-heatmap", (_req, res) => {
+  const db = readDB();
+  return res.json(
+    db.users.map((u) => ({
+      city: u.city,
+      zone: u.zone,
+      userId: u.id,
+      riskScore: db.policies.find((p) => p.userId === u.id)?.riskScore ?? 0
+    }))
+  );
 });
 
 export default app;
