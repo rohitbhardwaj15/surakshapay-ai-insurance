@@ -1,433 +1,71 @@
-# SurakshaPay  
-## AI-Powered Weekly Income Protection for Q-Commerce Delivery Partners
-
----
-
-## Executive Summary
-
-SurakshaPay is a parametric, AI-enabled micro-insurance platform designed specifically for hyperlocal Q-Commerce delivery partners working with platforms like Zepto and Blinkit.
-
-During our initial research, we observed that delivery partners lose income immediately when extreme rain, high pollution, or sudden zone shutdowns occur. The impact is not gradual — it is instant. Orders stop, working hours shrink, and surge incentives disappear.
-
-SurakshaPay focuses strictly on **Loss of Income Protection**.
-
-We do not insure health, accidents, or vehicle repairs.  
-We protect weekly earnings from uncontrollable external disruptions.
-
-Our pricing model is designed on a **weekly basis**, because gig workers think and earn week-to-week, not month-to-month.
-
----
-
-## Problem Context
-
-Q-Commerce delivery operates on:
-
-- 10–15 minute delivery commitments  
-- Highly localized zones  
-- Outdoor, weather-dependent mobility  
-- Hour-based earning structure  
-
-When disruption hits:
-
-- Orders decline within minutes  
-- Active hours drop sharply  
-- Incentives vanish  
-
-Based on observed patterns, income reduction during major disruptions can reach 20–30% in a single week.
-
-Currently, no automated income safety mechanism exists for such scenarios.
-
----
-
-## Target Persona
-
-### Persona: Ramesh Kumar
-
-- City: Delhi  
-- Platform: Zepto  
-- Average Weekly Income: ₹4,800  
-- Working Hours: 42 hours per week  
-- Zone Profile: High AQI region and flood-prone locality  
-
-We chose this persona to reflect a realistic high-risk urban delivery partner.
-
-### Risk Exposure Snapshot
-
-| Risk Type   | Annual Probability | Weekly Income Impact |
-|-------------|-------------------|----------------------|
-| Heavy Rain  | 18%               | 15–25%               |
-| AQI > 350   | 25%               | 10–20%               |
-| Heatwave    | 12%               | 10–15%               |
-| Curfew      | 5%                | 30–40%               |
-
----
-
-## Why Q-Commerce?
-
-We evaluated multiple gig categories before selecting Q-Commerce.
-
-We selected it because:
-
-- Earnings are tightly coupled with active hours  
-- Weather has immediate operational impact  
-- Hyperlocal risk modeling is possible  
-- Parametric automation fits naturally  
-
-This makes Q-Commerce ideal for a weekly parametric protection model.
-
----
-
-## Weekly Premium Model
-
-The premium structure is intentionally simple but AI-informed.
-
-### Risk Score Formula
-
-Risk Score =  
-(Zone Weather Risk × 0.35) +  
-(AQI Risk × 0.25) +  
-(Heatwave Risk × 0.15) +  
-(Historical Disruption Rate × 0.15) +  
-(Claim Behavior Score × 0.10)
-
-Weights were chosen based on relative frequency and severity impact observed in urban disruption data.
-
-The final score is normalized between 0 and 1.
-
----
-
-### Premium Calculation
-
-Weekly Premium = Base Rate × (1 + Risk Score)
-
-Example:
-
-Base Rate = ₹40  
-Risk Score = 0.42  
-
-Premium ≈ ₹57 per week
-
-We intentionally kept the base rate affordable so that premium remains below 1.5% of weekly income.
-
----
-
-### Coverage Cap
-
-Maximum Weekly Coverage = 70% of average weekly income
-
-For Ramesh:
-
-₹4,800 × 70% = ₹3,360
-
-We capped coverage at 70% to prevent moral hazard and ensure sustainable loss ratios.
-
----
-
-## Parametric Trigger Framework
-
-Claims are triggered automatically when predefined measurable thresholds are crossed.
-
-| Trigger            | Condition                     | Data Source |
-|--------------------|------------------------------|-------------|
-| Rainfall Trigger   | > 35mm within 3 hours        | Weather API |
-| AQI Trigger        | AQI > 350 for 4 hours        | AQI API     |
-| Heatwave Trigger   | Temperature > 44°C           | Weather API |
-| Flood Alert        | Waterlogging Index High      | Civic Mock  |
-| Curfew Trigger     | Verified Administrative Alert| Gov Mock    |
-
-The goal is to eliminate manual claims wherever possible.
-
----
-
-## Claim Processing Logic
-
-1. API monitors disruption data continuously  
-2. Threshold breach detected  
-3. Worker location cross-validated  
-4. Estimated working hour loss calculated  
-5. Fraud risk score generated  
-6. Claim auto-approved if risk acceptable  
-7. Instant payout simulated  
-
-No manual filing required.
-
----
-
-## AI Integration
-
-AI is used in three practical layers.
-
-### 1. Risk Intelligence Engine
-
-- Weekly premium prediction  
-- Zone-level risk forecasting  
-- Dynamic recalibration  
-
-Model choice: Gradient Boosting Regressor (balanced accuracy + interpretability)
-
----
-
-### 2. Income Disruption Estimator
-
-- Predicts working hours lost  
-- Uses zone activity density  
-- Estimates payout proportionally  
-
----
-
-### 3. Fraud Detection Engine
-
-Model: Isolation Forest (Anomaly Detection)
-
-Used to detect:
-
-- GPS spoofing patterns  
-- Activity mismatch during disruption  
-- Repeated low-risk claims  
-- Duplicate behavior clusters  
-
-Fraud Score > 0.75 triggers manual review.
-
-We selected Isolation Forest due to its efficiency in unsupervised anomaly detection.
-
----
-
-## System Architecture
-
-Frontend: React (Web-first approach)
-
-Backend: Node.js + Express REST APIs
-
-AI Layer: Python microservice (FastAPI)
-
-Database: PostgreSQL
-
-External Integrations:
-
-- Weather API  
-- AQI API  
-- Mock Government Alert API  
-- Razorpay Test Mode (Simulated payouts)
-
----
-
-## User Workflow
-
-1. User Registration  
-2. Location Profiling  
-3. AI-Based Risk Score Calculation  
-4. Weekly Premium Display  
-5. Policy Activation  
-6. Real-Time Trigger Monitoring  
-7. Automated Claim Decision  
-8. Simulated Payout  
-9. Dashboard Update  
-
----
-
-## Dashboards
-
-### Worker View
-
-- Active Weekly Coverage  
-- Premium History  
-- Earnings Protected  
-- Trigger Notifications  
-- Payout Status  
-
-### Admin View
-
-- Loss Ratio  
-- Fraud Alerts  
-- Zone Risk Heatmap  
-- Weekly Claim Forecast  
-- Capital Exposure Overview  
-
----
-
-## Business Sustainability
-
-Automation reduces:
-
-- Claim verification costs  
-- Manual underwriting effort  
-- Administrative overhead  
-
-Affordable weekly pricing supports adoption while maintaining manageable risk exposure.
-
-The parametric design reduces disputes and speeds up settlement cycles.
-
----
-
-## Innovation Highlights
-
-- Hyperlocal AI risk scoring  
-- Behavioral premium adjustments  
-- Surge-hour optional booster coverage  
-- Real-time exposure monitoring  
-- Predictive disruption modeling  
-
----
-
-## 6-Week Development Roadmap
-
-### Phase 1
-- Persona finalization  
-- Premium logic validation  
-- Risk model design  
-- Architecture blueprint  
-
-### Phase 2
-- Policy management system  
-- Dynamic pricing engine  
-- Parametric trigger automation  
-- Claims processing logic  
-
-### Phase 3
-- Advanced fraud detection  
-- Instant payout simulation  
-- Analytics dashboard  
-- End-to-end system optimization  
-
----
-
-## Conclusion
-
-SurakshaPay converts unpredictable environmental disruption into structured, automated weekly income protection.
-
-This platform does not insure events.  
-It protects working hours.  
-It protects weekly earnings.
-## Adversarial Defense & Anti-Spoofing Strategy
-
-As part of the “Market Crash” scenario, we assume the presence of coordinated fraud attempts using GPS spoofing to trigger false claims.
-
-Simple GPS validation is not sufficient. Therefore, SurakshaPay implements a multi-layered fraud detection and validation architecture.
-
----
-
-### 1. Multi-Signal Location Verification
-
-Instead of relying only on GPS, we validate location using:
-
-- GPS coordinates  
-- Network-based location (IP / cell tower approximation)  
-- Movement consistency (speed and route patterns)  
-
-If these signals do not align, the system flags a potential spoofing attempt.
-
----
-
-### 2. Movement Behavior Analysis
-
-Fake GPS users often show unrealistic movement patterns such as:
-
-- Sudden large jumps in location  
-- Perfectly static location during long periods  
-- Unrealistic travel speeds  
-
-We track:
-
-- Speed consistency  
-- Route continuity  
-- Activity timestamps  
-
-Any abnormal pattern increases fraud risk score.
-
----
-
-### 3. Activity Correlation Check
-
-A genuine worker shows:
-
-- Order activity before disruption  
-- Reduced activity during disruption  
-- Gradual recovery after event  
-
-Fraud patterns typically show:
-
-- No real activity history  
-- Sudden claim during trigger  
-- No correlation with platform demand  
-
-We cross-check claim requests with historical activity logs.
-
----
-
-### 4. Zone-Based Crowd Validation
-
-We compare behavior across workers in the same zone:
-
-- If 90% workers show reduced activity → event is genuine  
-- If only few accounts claim disruption → potential fraud  
-
-This helps identify isolated fake claims.
-
----
-
-### 5. Device Fingerprinting
-
-Each device is tracked using:
-
-- Device ID  
-- App usage patterns  
-- Login behavior  
-
-Multiple accounts from the same device or suspicious switching patterns are flagged.
-
----
-
-### 6. Fraud Risk Scoring System
-
-Each claim is assigned a Fraud Risk Score based on:
-
-- Location mismatch  
-- Movement anomaly  
-- Activity inconsistency  
-- Device duplication  
-
-If:
-
-- Score < 0.75 → Auto Approved  
-- Score ≥ 0.75 → Sent for manual review  
-
----
-
-### 7. Fraud Ring Detection
-
-We identify coordinated fraud using:
-
-- Clustered claim timing  
-- Same device/network usage  
-- Similar location spoof patterns  
-
-Graph-based clustering helps detect fraud rings instead of just individual frauds.
-
----
-
-### 8. Honest User Protection
-
-To ensure genuine users are not penalized:
-
-- Single anomaly does not trigger rejection  
-- Multiple signals are required  
-- Claims are only blocked when high confidence fraud is detected  
-
-This maintains trust and fairness.
-
----
-
-### Summary
-
-SurakshaPay does not rely on a single validation method.
-
-It combines:
-
-- Multi-signal location verification  
-- Behavioral analysis  
-- AI-based anomaly detection  
-- Crowd validation  
-
-This layered approach ensures the system can withstand adversarial conditions while protecting genuine users.
-
-
+# SmartQueue - AI-Powered Virtual Queue Optimization System
+
+Production-ready full-stack prototype for hackathon evaluation.
+
+## Problem Solved
+Hospitals, banks, and government offices face:
+- Long queues
+- Time wastage
+- Crowd mismanagement
+
+SmartQueue provides:
+- Dynamic token assignment
+- AI waiting-time prediction
+- Best-time-to-visit recommendations
+- Peak-hour and load-day intelligence
+- Admin analytics dashboard
+
+## Tech Stack
+- Frontend: HTML, CSS, Vanilla JS, Chart.js (Kimi-inspired UI)
+- Backend: Node.js, Express
+- Data: JSON store with serverless-safe in-memory fallback
+- Deployment: Vercel (frontend + backend)
+
+## Project Structure
+- `backend/` - SmartQueue API service
+- `surakshapay/` - Frontend single-page app
+
+## Core API Endpoints
+- `GET /health`
+- `GET /api/queues`
+- `GET /api/queues/:queueId`
+- `POST /api/tokens/issue`
+- `POST /api/queues/:queueId/serve-next`
+- `POST /api/tokens/:tokenId/complete`
+- `GET /api/predictions/:queueId`
+- `GET /api/recommendations/:queueId`
+- `GET /api/admin/analytics`
+
+## Local Run
+### 1) Backend
+```bash
+cd backend
+npm install
+npm run dev
+```
+Backend runs on `http://localhost:4000`.
+
+### 2) Frontend
+Open `surakshapay/index.html` in browser and set API URL to `http://localhost:4000`.
+
+## AI Modeling Highlights
+- Wait-time prediction uses:
+  - Current waiting load
+  - Active counters and service-time baseline
+  - Hour/day demand multipliers
+  - Historical traffic correction
+  - Priority-aware dynamic adjustments
+- Insights generation returns statements like:
+  - `Aaj 3-5 PM peak traffic hoga.`
+  - `Monday highest load day hai.`
+
+## Deployment Notes
+Deploy backend and frontend as separate Vercel projects.
+Set frontend API URL to backend deployment URL in the app's API field.
+
+## Resume/Portfolio Impact
+This project demonstrates:
+- Data modeling and simulation
+- Prediction logic and heuristics
+- Dashboard/analytics visualization
+- Full-stack architecture and deployment readiness

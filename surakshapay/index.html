@@ -1,13 +1,818 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SurakshaPay</title>
-    <script type="module" crossorigin src="./assets/index-Btu4nDFC.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-C7t_QFPI.css">
+    <title>SmartQueue AI | Virtual Queue Optimization</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <style>
+      :root {
+        --bg: #070b14;
+        --bg-soft: #101726;
+        --panel: rgba(14, 22, 38, 0.76);
+        --panel-border: rgba(143, 170, 212, 0.2);
+        --text: #e7eefc;
+        --muted: #96a9d0;
+        --cyan: #49d6ff;
+        --mint: #5ff6ca;
+        --amber: #ffcc72;
+        --rose: #ff8aa4;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Plus Jakarta Sans", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 8% 8%, rgba(73, 214, 255, 0.18), transparent 28%),
+          radial-gradient(circle at 88% 16%, rgba(95, 246, 202, 0.14), transparent 26%),
+          linear-gradient(180deg, #070b14, #090f1c 58%, #0d1524);
+        min-height: 100vh;
+      }
+
+      .shell {
+        width: min(1240px, 94vw);
+        margin: 26px auto 34px;
+      }
+
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .logo {
+        width: 42px;
+        height: 42px;
+        border-radius: 13px;
+        background: linear-gradient(135deg, #48d5ff, #5ff6ca);
+        color: #04121b;
+        font-weight: 800;
+        display: grid;
+        place-items: center;
+        box-shadow: 0 14px 36px rgba(73, 214, 255, 0.42);
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 1.14rem;
+        letter-spacing: 0.02em;
+      }
+
+      .brand p {
+        margin: 2px 0 0;
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+
+      .status-chip {
+        background: rgba(95, 246, 202, 0.14);
+        border: 1px solid rgba(95, 246, 202, 0.45);
+        color: #9ffadf;
+        padding: 8px 12px;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 700;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1.25fr 1fr;
+        gap: 14px;
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 18px;
+        backdrop-filter: blur(14px);
+        padding: 16px;
+        box-shadow: inset 0 0 0 1px rgba(11, 19, 33, 0.5), 0 12px 36px rgba(4, 9, 21, 0.36);
+      }
+
+      .hero {
+        display: grid;
+        gap: 10px;
+      }
+
+      .hero-title {
+        margin: 0;
+        font-size: clamp(1.2rem, 1.8vw, 1.6rem);
+      }
+
+      .hero-sub {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+
+      .metric-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+      }
+
+      .metric {
+        padding: 12px;
+        border-radius: 12px;
+        background: rgba(19, 29, 49, 0.8);
+        border: 1px solid rgba(130, 158, 202, 0.16);
+      }
+
+      .metric .label {
+        color: var(--muted);
+        font-size: 0.76rem;
+      }
+
+      .metric .value {
+        margin-top: 6px;
+        font-size: 1.12rem;
+        font-weight: 700;
+      }
+
+      .panel-title {
+        margin: 0 0 12px;
+        font-size: 0.98rem;
+        letter-spacing: 0.01em;
+      }
+
+      .queue-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+      }
+
+      .queue-item {
+        border: 1px solid rgba(130, 158, 202, 0.2);
+        border-radius: 12px;
+        background: rgba(20, 30, 50, 0.82);
+        padding: 12px;
+        cursor: pointer;
+        transition: 0.2s ease;
+      }
+
+      .queue-item:hover {
+        transform: translateY(-2px);
+        border-color: rgba(73, 214, 255, 0.55);
+      }
+
+      .queue-item.active {
+        background: linear-gradient(160deg, rgba(73, 214, 255, 0.24), rgba(95, 246, 202, 0.12));
+        border-color: rgba(73, 214, 255, 0.74);
+      }
+
+      .queue-item h4 {
+        margin: 0 0 7px;
+        font-size: 0.95rem;
+      }
+
+      .queue-meta {
+        color: var(--muted);
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.76rem;
+      }
+
+      .queue-wait {
+        margin-top: 8px;
+        font-size: 0.95rem;
+        font-weight: 700;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 12px;
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      label {
+        display: block;
+        font-size: 0.74rem;
+        color: var(--muted);
+        margin-bottom: 5px;
+      }
+
+      input,
+      select {
+        width: 100%;
+        border: 1px solid rgba(128, 152, 194, 0.25);
+        background: rgba(6, 12, 22, 0.82);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 10px;
+        font-size: 0.88rem;
+        font-family: inherit;
+      }
+
+      .button-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 12px;
+        font-family: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .btn-primary {
+        background: linear-gradient(120deg, #49d6ff, #5ff6ca);
+        color: #04131d;
+      }
+
+      .btn-soft {
+        background: rgba(73, 214, 255, 0.16);
+        color: #89e4ff;
+        border: 1px solid rgba(73, 214, 255, 0.4);
+      }
+
+      .token-receipt {
+        background: rgba(95, 246, 202, 0.11);
+        border: 1px solid rgba(95, 246, 202, 0.32);
+        border-radius: 12px;
+        padding: 12px;
+        margin-top: 12px;
+      }
+
+      .mono {
+        font-family: "IBM Plex Mono", monospace;
+      }
+
+      .feed {
+        display: grid;
+        gap: 8px;
+        max-height: 280px;
+        overflow: auto;
+      }
+
+      .feed-item {
+        border-radius: 11px;
+        background: rgba(13, 23, 39, 0.84);
+        border: 1px solid rgba(121, 147, 186, 0.22);
+        padding: 10px;
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .badge {
+        font-size: 0.67rem;
+        padding: 4px 7px;
+        border-radius: 999px;
+        font-weight: 700;
+      }
+
+      .badge.waiting {
+        color: #a3d6ff;
+        background: rgba(73, 214, 255, 0.16);
+      }
+
+      .badge.serving {
+        color: #99f8db;
+        background: rgba(95, 246, 202, 0.16);
+      }
+
+      .badge.completed {
+        color: #ffdca0;
+        background: rgba(255, 204, 114, 0.18);
+      }
+
+      .insights {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 8px;
+      }
+
+      .insights li {
+        border-radius: 10px;
+        border: 1px solid rgba(255, 204, 114, 0.32);
+        background: rgba(255, 204, 114, 0.1);
+        color: #ffe3b0;
+        font-size: 0.84rem;
+        padding: 9px 10px;
+      }
+
+      .chart-grid {
+        margin-top: 12px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .chart-box {
+        border-radius: 12px;
+        border: 1px solid rgba(128, 152, 194, 0.21);
+        background: rgba(10, 18, 31, 0.86);
+        padding: 10px;
+      }
+
+      .chart-box canvas {
+        width: 100%;
+        height: 220px;
+      }
+
+      .toast {
+        position: fixed;
+        top: 20px;
+        right: 18px;
+        background: rgba(15, 30, 49, 0.95);
+        color: #e7eefc;
+        border: 1px solid rgba(73, 214, 255, 0.55);
+        border-radius: 11px;
+        padding: 11px 14px;
+        font-size: 0.85rem;
+        display: none;
+        z-index: 20;
+      }
+
+      .footer {
+        margin-top: 10px;
+        text-align: right;
+        color: #90a4cb;
+        font-size: 0.75rem;
+      }
+
+      .api-config {
+        margin-top: 10px;
+        display: flex;
+        gap: 8px;
+      }
+
+      .api-config input {
+        flex: 1;
+      }
+
+      @media (max-width: 980px) {
+        .grid,
+        .split,
+        .chart-grid,
+        .metric-row,
+        .queue-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand">
+          <div class="logo">SQ</div>
+          <div>
+            <h1>SmartQueue AI</h1>
+            <p>Virtual Queue Optimization System | Production-ready Hackathon Prototype</p>
+          </div>
+        </div>
+        <div class="status-chip" id="liveStatus">Connecting API...</div>
+      </div>
+
+      <div class="grid">
+        <section class="card hero">
+          <h2 class="hero-title">AI-powered token flow for hospitals, banks, and government offices</h2>
+          <p class="hero-sub">
+            Dynamic token assignment, wait-time prediction, best-time suggestions, and live admin analytics powered by historical demand modeling.
+          </p>
+          <div class="metric-row">
+            <div class="metric">
+              <div class="label">Total Queues</div>
+              <div class="value" id="metricQueues">-</div>
+            </div>
+            <div class="metric">
+              <div class="label">Waiting Now</div>
+              <div class="value" id="metricWaiting">-</div>
+            </div>
+            <div class="metric">
+              <div class="label">Serving Now</div>
+              <div class="value" id="metricServing">-</div>
+            </div>
+            <div class="metric">
+              <div class="label">Completed Today</div>
+              <div class="value" id="metricCompleted">-</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3 class="panel-title">Queue Selector</h3>
+          <div class="queue-grid" id="queueGrid"></div>
+          <div class="api-config">
+            <input id="apiInput" placeholder="API URL (e.g., https://your-backend.vercel.app)" />
+            <button id="saveApiBtn" class="btn-soft">Set API</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="split" style="margin-top: 14px">
+        <section class="card">
+          <h3 class="panel-title">Issue Token (Citizen/User Side)</h3>
+          <div class="form-grid">
+            <div>
+              <label for="customerName">Customer Name</label>
+              <input id="customerName" placeholder="Enter full name" />
+            </div>
+            <div>
+              <label for="customerPhone">Phone</label>
+              <input id="customerPhone" placeholder="Enter phone" />
+            </div>
+            <div>
+              <label for="serviceType">Service Type</label>
+              <input id="serviceType" placeholder="OPD / KYC / Renewal" value="General" />
+            </div>
+            <div>
+              <label for="priorityLevel">Priority</label>
+              <select id="priorityLevel">
+                <option value="0">Normal</option>
+                <option value="1">Senior Citizen</option>
+                <option value="2">Emergency</option>
+              </select>
+            </div>
+          </div>
+          <div class="button-row">
+            <button class="btn-primary" id="issueTokenBtn">Issue Dynamic Token</button>
+            <button class="btn-soft" id="serveNextBtn">Serve Next</button>
+            <button class="btn-soft" id="refreshBtn">Refresh</button>
+          </div>
+          <div class="token-receipt" id="tokenReceipt" style="display: none"></div>
+        </section>
+
+        <section class="card">
+          <h3 class="panel-title">AI Recommendations</h3>
+          <div id="recommendMeta" class="hero-sub">Select a queue to load recommendation intelligence.</div>
+          <ul class="insights" id="insightsList"></ul>
+        </section>
+      </div>
+
+      <div class="split" style="margin-top: 14px">
+        <section class="card">
+          <h3 class="panel-title">Live Token Board</h3>
+          <div class="feed" id="tokenFeed"></div>
+        </section>
+
+        <section class="card">
+          <h3 class="panel-title">Admin Analytics</h3>
+          <div class="chart-grid">
+            <div class="chart-box">
+              <canvas id="dayChart"></canvas>
+            </div>
+            <div class="chart-box">
+              <canvas id="hourChart"></canvas>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="footer">SmartQueue AI Prototype | Frontend + Backend integrated</div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+      const apiInput = document.getElementById("apiInput");
+      const saveApiBtn = document.getElementById("saveApiBtn");
+      const liveStatus = document.getElementById("liveStatus");
+      const queueGrid = document.getElementById("queueGrid");
+      const tokenFeed = document.getElementById("tokenFeed");
+      const insightsList = document.getElementById("insightsList");
+      const recommendMeta = document.getElementById("recommendMeta");
+      const tokenReceipt = document.getElementById("tokenReceipt");
+
+      const metricQueues = document.getElementById("metricQueues");
+      const metricWaiting = document.getElementById("metricWaiting");
+      const metricServing = document.getElementById("metricServing");
+      const metricCompleted = document.getElementById("metricCompleted");
+
+      const customerName = document.getElementById("customerName");
+      const customerPhone = document.getElementById("customerPhone");
+      const serviceType = document.getElementById("serviceType");
+      const priorityLevel = document.getElementById("priorityLevel");
+
+      const issueTokenBtn = document.getElementById("issueTokenBtn");
+      const serveNextBtn = document.getElementById("serveNextBtn");
+      const refreshBtn = document.getElementById("refreshBtn");
+
+      const toast = document.getElementById("toast");
+
+      let state = {
+        queues: [],
+        selectedQueueId: null,
+        tokens: [],
+        analytics: null
+      };
+
+      let dayChart;
+      let hourChart;
+
+      const storedApi = localStorage.getItem("smartqueue_api");
+      const defaultApi = storedApi || "https://backend-six-theta-80.vercel.app";
+      apiInput.value = defaultApi;
+
+      function getApiBase() {
+        return apiInput.value.trim().replace(/\/$/, "");
+      }
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.style.display = "block";
+        clearTimeout(window.toastTimer);
+        window.toastTimer = setTimeout(() => {
+          toast.style.display = "none";
+        }, 2500);
+      }
+
+      async function request(path, options = {}) {
+        const response = await fetch(`${getApiBase()}${path}`, {
+          headers: { "Content-Type": "application/json" },
+          ...options
+        });
+
+        if (!response.ok) {
+          let message = `API error ${response.status}`;
+          try {
+            const data = await response.json();
+            message = data.error || message;
+          } catch (error) {
+            console.error(error);
+          }
+          throw new Error(message);
+        }
+
+        return response.json();
+      }
+
+      function renderQueueCards() {
+        queueGrid.innerHTML = "";
+        for (const queue of state.queues) {
+          const card = document.createElement("button");
+          card.className = `queue-item ${state.selectedQueueId === queue.id ? "active" : ""}`;
+          card.innerHTML = `
+            <h4>${queue.name}</h4>
+            <div class="queue-meta">
+              <span>${queue.category}</span>
+              <span>${queue.location}</span>
+            </div>
+            <div class="queue-wait">Wait ${queue.live.predictedWaitMinutes}m <span class="mono">(${queue.live.confidence}%)</span></div>
+          `;
+          card.addEventListener("click", () => {
+            state.selectedQueueId = queue.id;
+            refreshAll();
+          });
+          queueGrid.appendChild(card);
+        }
+      }
+
+      function renderTokenFeed() {
+        tokenFeed.innerHTML = "";
+
+        const filtered = state.tokens
+          .filter((token) => (state.selectedQueueId ? token.queueId === state.selectedQueueId : true))
+          .slice(0, 20);
+
+        if (!filtered.length) {
+          tokenFeed.innerHTML = `<div class="hero-sub">No tokens found for selected queue.</div>`;
+          return;
+        }
+
+        for (const token of filtered) {
+          const item = document.createElement("div");
+          item.className = "feed-item";
+          item.innerHTML = `
+            <div>
+              <div class="mono">${token.tokenNumber}</div>
+              <div style="font-size:0.79rem;color:var(--muted)">${token.customerName} | ${token.serviceType}</div>
+            </div>
+            <div style="text-align:right">
+              <span class="badge ${token.status}">${token.status.toUpperCase()}</span>
+              <div style="font-size:0.73rem;color:var(--muted);margin-top:4px">P${token.priority} | ${token.predictedWaitMinutes || 0}m</div>
+            </div>
+          `;
+          tokenFeed.appendChild(item);
+        }
+      }
+
+      function renderMetrics() {
+        if (!state.analytics) return;
+        metricQueues.textContent = state.analytics.summary.totalQueues;
+        metricWaiting.textContent = state.analytics.summary.waiting;
+        metricServing.textContent = state.analytics.summary.serving;
+        metricCompleted.textContent = state.analytics.summary.completedToday;
+      }
+
+      function renderCharts() {
+        if (!state.analytics) return;
+
+        const dayCtx = document.getElementById("dayChart");
+        const hourCtx = document.getElementById("hourChart");
+
+        if (dayChart) dayChart.destroy();
+        if (hourChart) hourChart.destroy();
+
+        dayChart = new Chart(dayCtx, {
+          type: "bar",
+          data: {
+            labels: state.analytics.dayLoad.map((d) => d.dayName.slice(0, 3)),
+            datasets: [
+              {
+                label: "Avg tokens/day",
+                data: state.analytics.dayLoad.map((d) => d.avgTokens),
+                borderRadius: 8,
+                backgroundColor: "rgba(73,214,255,0.72)"
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { color: "#d8e8ff" } }
+            },
+            scales: {
+              x: { ticks: { color: "#b1c5eb" }, grid: { color: "rgba(120,145,190,0.2)" } },
+              y: { ticks: { color: "#b1c5eb" }, grid: { color: "rgba(120,145,190,0.2)" } }
+            }
+          }
+        });
+
+        hourChart = new Chart(hourCtx, {
+          type: "line",
+          data: {
+            labels: state.analytics.hourlyLoad.map((h) => `${h.hour}:00`),
+            datasets: [
+              {
+                label: "Hourly load",
+                data: state.analytics.hourlyLoad.map((h) => h.avgTokens),
+                borderColor: "#5ff6ca",
+                backgroundColor: "rgba(95,246,202,0.2)",
+                tension: 0.35,
+                fill: true,
+                pointRadius: 3
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { color: "#d8e8ff" } }
+            },
+            scales: {
+              x: { ticks: { color: "#b1c5eb" }, grid: { color: "rgba(120,145,190,0.2)" } },
+              y: { ticks: { color: "#b1c5eb" }, grid: { color: "rgba(120,145,190,0.2)" } }
+            }
+          }
+        });
+      }
+
+      async function loadRecommendations() {
+        if (!state.selectedQueueId) return;
+        try {
+          const data = await request(`/api/recommendations/${state.selectedQueueId}`);
+          recommendMeta.textContent = `${data.queueName} | Predicted now: ${data.predictedNowMinutes} min | Confidence: ${data.confidence}%`;
+          insightsList.innerHTML = "";
+          data.keyAlerts.forEach((message) => {
+            const li = document.createElement("li");
+            li.textContent = message;
+            insightsList.appendChild(li);
+          });
+        } catch (error) {
+          recommendMeta.textContent = `Recommendation unavailable: ${error.message}`;
+          insightsList.innerHTML = "";
+        }
+      }
+
+      async function refreshAll() {
+        try {
+          const [queues, tokens, analytics] = await Promise.all([
+            request("/api/queues"),
+            request("/api/tokens"),
+            request("/api/admin/analytics")
+          ]);
+
+          state.queues = queues;
+          state.tokens = tokens;
+          state.analytics = analytics;
+
+          if (!state.selectedQueueId && queues.length) {
+            state.selectedQueueId = queues[0].id;
+          }
+
+          liveStatus.textContent = "API Connected";
+          renderQueueCards();
+          renderTokenFeed();
+          renderMetrics();
+          renderCharts();
+          await loadRecommendations();
+        } catch (error) {
+          liveStatus.textContent = "API Disconnected";
+          showToast(error.message);
+        }
+      }
+
+      issueTokenBtn.addEventListener("click", async () => {
+        if (!state.selectedQueueId) {
+          showToast("Please select a queue first.");
+          return;
+        }
+
+        if (!customerName.value.trim()) {
+          showToast("Customer name is required.");
+          return;
+        }
+
+        try {
+          const payload = {
+            queueId: state.selectedQueueId,
+            customerName: customerName.value.trim(),
+            phone: customerPhone.value.trim(),
+            serviceType: serviceType.value.trim() || "General",
+            priority: Number(priorityLevel.value)
+          };
+
+          const response = await request("/api/tokens/issue", {
+            method: "POST",
+            body: JSON.stringify(payload)
+          });
+
+          tokenReceipt.style.display = "block";
+          tokenReceipt.innerHTML = `
+            <div><strong>Token Issued:</strong> <span class="mono">${response.token.tokenNumber}</span></div>
+            <div>Predicted Wait: <strong>${response.prediction.estimatedWaitMinutes} minutes</strong></div>
+            <div>AI Confidence: <strong>${response.prediction.confidence}%</strong></div>
+          `;
+
+          customerName.value = "";
+          customerPhone.value = "";
+          showToast("Dynamic token issued successfully.");
+          refreshAll();
+        } catch (error) {
+          showToast(error.message);
+        }
+      });
+
+      serveNextBtn.addEventListener("click", async () => {
+        if (!state.selectedQueueId) {
+          showToast("Select a queue first.");
+          return;
+        }
+
+        try {
+          await request(`/api/queues/${state.selectedQueueId}/serve-next`, {
+            method: "POST",
+            body: JSON.stringify({ counterNo: 1 })
+          });
+          showToast("Serving next token now.");
+          refreshAll();
+        } catch (error) {
+          showToast(error.message);
+        }
+      });
+
+      refreshBtn.addEventListener("click", refreshAll);
+
+      saveApiBtn.addEventListener("click", () => {
+        const value = getApiBase();
+        localStorage.setItem("smartqueue_api", value);
+        showToast("API URL saved.");
+        refreshAll();
+      });
+
+      refreshAll();
+      setInterval(refreshAll, 30000);
+    </script>
   </body>
 </html>
+
