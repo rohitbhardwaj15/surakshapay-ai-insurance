@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_PATH = path.resolve(__dirname, "../data/db.json");
+const IS_SERVERLESS = Boolean(process.env.VERCEL);
 
 export const defaultDB = {
   users: [],
@@ -14,7 +15,18 @@ export const defaultDB = {
   triggers: []
 };
 
+function getMemoryDB() {
+  if (!globalThis.__surakshaMemoryDB) {
+    globalThis.__surakshaMemoryDB = structuredClone(defaultDB);
+  }
+  return globalThis.__surakshaMemoryDB;
+}
+
 export function readDB() {
+  if (IS_SERVERLESS) {
+    return getMemoryDB();
+  }
+
   if (!fs.existsSync(DB_PATH)) {
     writeDB(defaultDB);
     return structuredClone(defaultDB);
@@ -25,6 +37,10 @@ export function readDB() {
 }
 
 export function writeDB(db) {
+  if (IS_SERVERLESS) {
+    globalThis.__surakshaMemoryDB = db;
+    return;
+  }
   fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf-8");
 }
 
