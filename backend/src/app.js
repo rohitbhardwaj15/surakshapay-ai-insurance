@@ -32,6 +32,19 @@ function getPolicyByUser(db, userId) {
   return db.policies.find((p) => p.userId === userId);
 }
 
+app.get("/", (_req, res) => {
+  res.json({
+    service: "SurakshaPay Backend API",
+    status: "ok",
+    docs: {
+      health: "/health",
+      register: "/api/users/register",
+      dashboard: "/api/dashboard/:userId"
+    },
+    time: now()
+  });
+});
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "SurakshaPay API", time: now() });
 });
