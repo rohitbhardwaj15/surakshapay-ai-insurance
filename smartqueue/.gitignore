@@ -1,9 +1,0 @@
-﻿node_modules/
-.next/
-out/
-coverage/
-.env
-.env.local
-.DS_Store
-.vercel/
-dist/
