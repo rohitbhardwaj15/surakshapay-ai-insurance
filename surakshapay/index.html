@@ -19,20 +19,48 @@
         var root = document.getElementById("root");
         var fallback = document.getElementById("suraksha-fallback");
         var btn = document.getElementById("suraksha-reset-btn");
+        var timer;
+
+        function hasMountedApp() {
+          return !!(root && root.children && root.children.length > 0);
+        }
+
+        function hideFallback() {
+          if (fallback) fallback.style.display = "none";
+        }
+
         function showFallback() {
           if (!root || !fallback) return;
-          if (root.children.length === 0) {
+          if (!hasMountedApp()) {
             fallback.style.display = "flex";
           }
         }
+
         btn && btn.addEventListener("click", function () {
           try {
+            localStorage.clear();
+            sessionStorage.clear();
             localStorage.removeItem("surakshapay_userId");
           } catch (e) {}
-          location.href = "/";
+          location.href = "/?reset=" + Date.now();
         });
+
+        // If app mounts late, keep fallback hidden.
+        var observer = new MutationObserver(function () {
+          if (hasMountedApp()) {
+            hideFallback();
+            if (timer) clearTimeout(timer);
+          }
+        });
+        if (root) {
+          observer.observe(root, { childList: true, subtree: true });
+        }
+
         window.addEventListener("error", showFallback);
-        setTimeout(showFallback, 5000);
+        window.addEventListener("unhandledrejection", showFallback);
+
+        // Give app enough time to boot on slow connections.
+        timer = setTimeout(showFallback, 15000);
       })();
     </script>
   </body>
