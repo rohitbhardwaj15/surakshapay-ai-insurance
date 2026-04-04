@@ -9,5 +9,31 @@
   </head>
   <body>
     <div id="root"></div>
+    <div id="suraksha-fallback" style="display:none;min-height:100vh;background:#070b14;color:#f4f7ff;font-family:Arial,sans-serif;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:24px;">
+      <h2 style="margin:0 0 12px 0;">SurakshaPay is refreshing</h2>
+      <p style="margin:0 0 18px 0;color:#a9b3d2;">A stale browser cache was detected. Reset local session and continue.</p>
+      <button id="suraksha-reset-btn" style="background:#4c6ef5;color:white;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;">Reset and Reload</button>
+    </div>
+    <script>
+      (function () {
+        var root = document.getElementById("root");
+        var fallback = document.getElementById("suraksha-fallback");
+        var btn = document.getElementById("suraksha-reset-btn");
+        function showFallback() {
+          if (!root || !fallback) return;
+          if (root.children.length === 0) {
+            fallback.style.display = "flex";
+          }
+        }
+        btn && btn.addEventListener("click", function () {
+          try {
+            localStorage.removeItem("surakshapay_userId");
+          } catch (e) {}
+          location.href = "/";
+        });
+        window.addEventListener("error", showFallback);
+        setTimeout(showFallback, 5000);
+      })();
+    </script>
   </body>
 </html>
