@@ -59,9 +59,9 @@ app.post("/api/users/register", (req, res) => {
     return res.status(400).json({ error: "name, city, platform and weeklyIncome are required." });
   }
 
-  const user = updateDB((db) => {
+  const result = updateDB((db) => {
     const id = crypto.randomUUID();
-    const profile = {
+    const user = {
       id,
       name,
       city,
@@ -72,13 +72,51 @@ app.post("/api/users/register", (req, res) => {
       lastActiveAt: now(),
       createdAt: now()
     };
-    db.users.push(profile);
-    return profile;
+    db.users.push(user);
+
+    // Create default policy at registration so dashboard can load immediately.
+    const riskScore = calculateRiskScore({
+      city: user.city,
+      claimCount: 0,
+      suspiciousCount: 0
+    });
+    const policy = {
+      id: crypto.randomUUID(),
+      userId: user.id,
+      riskScore,
+      premium: calculatePremium(user.weeklyIncome, riskScore),
+      coverageAmount: computeCoverage(user.weeklyIncome),
+      status: "Inactive",
+      exclusions: [
+        "War / Armed Conflict / Riots",
+        "Pandemics (e.g., COVID-19)",
+        "Nationwide lockdowns",
+        "Platform-wide outages",
+        "Large-scale disasters (earthquakes, cyclones)"
+      ],
+      complianceNotes: {
+        moralHazard: "Coverage capped at 70%; no payout for inactivity before trigger; repeated claims monitored.",
+        basisRisk: "Zone-based and shift-time aligned trigger validation with multi-factor checks.",
+        failSafe: "Verification buffer, duplicate-claim lock, and manual review for high fraud score."
+      },
+      createdAt: now(),
+      updatedAt: now()
+    };
+    db.policies.push(policy);
+    db.riskScores.push({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      value: riskScore,
+      generatedAt: now()
+    });
+
+    return { user, policy };
   });
 
   return res.status(201).json({
-    user,
-    ...user
+    user: result.user,
+    policy: result.policy,
+    ...result.user
   });
 });
 
