@@ -76,7 +76,10 @@ app.post("/api/users/register", (req, res) => {
     return profile;
   });
 
-  return res.status(201).json(user);
+  return res.status(201).json({
+    user,
+    ...user
+  });
 });
 
 app.get("/api/users/register", (_req, res) => {
