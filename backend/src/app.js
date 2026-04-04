@@ -1,13 +1,17 @@
 import crypto from "crypto";
-import cors from "cors";
 import express from "express";
+import cors from "cors";
 import {
-  buildAdminAnalytics,
-  buildRecommendationCopy,
-  createSyntheticHistoryForQueue,
-  generateTokenNumber,
-  getQueueInsights,
-  predictWaitTime
+  basisRiskValidation,
+  calculatePremium,
+  calculateRiskScore,
+  checkExclusion,
+  computeCoverage,
+  estimatePayout,
+  fraudScoreForClaim,
+  isActivityEligible,
+  isTriggerQualified,
+  shouldManualReview
 } from "./engine.js";
 import { readDB, updateDB } from "./store.js";
 
@@ -16,399 +20,431 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-function nowIso() {
+function now() {
   return new Date().toISOString();
 }
 
-function bootstrap() {
-  updateDB((db) => {
-    if (db.queues.length > 0 && db.trafficLogs.length > 0) return;
-
-    if (db.queues.length === 0) {
-      db.queues = [
-        {
-          id: "queue_hosp_opd",
-          name: "City Hospital OPD",
-          category: "Healthcare",
-          location: "Noida",
-          counters: 6,
-          avgServiceMinutes: 14,
-          baseTraffic: 24,
-          isActive: true,
-          createdAt: nowIso()
-        },
-        {
-          id: "queue_bank",
-          name: "Metro Bank Services",
-          category: "Banking",
-          location: "Delhi",
-          counters: 5,
-          avgServiceMinutes: 9,
-          baseTraffic: 28,
-          isActive: true,
-          createdAt: nowIso()
-        },
-        {
-          id: "queue_govt",
-          name: "Gov Citizen Center",
-          category: "Government",
-          location: "Ghaziabad",
-          counters: 4,
-          avgServiceMinutes: 18,
-          baseTraffic: 21,
-          isActive: true,
-          createdAt: nowIso()
-        },
-        {
-          id: "queue_diag",
-          name: "Diagnostics Lab",
-          category: "Healthcare",
-          location: "Noida",
-          counters: 3,
-          avgServiceMinutes: 11,
-          baseTraffic: 16,
-          isActive: true,
-          createdAt: nowIso()
-        }
-      ];
-    }
-
-    if (db.tokens.length === 0) {
-      const seedTime = Date.now();
-      db.tokens = [
-        {
-          id: crypto.randomUUID(),
-          tokenNumber: "CHO-0001",
-          queueId: "queue_hosp_opd",
-          customerName: "Rahul Verma",
-          phone: "9876543210",
-          priority: 0,
-          serviceType: "General OPD",
-          status: "waiting",
-          predictedWaitMinutes: 18,
-          issuedAt: new Date(seedTime - 15 * 60000).toISOString()
-        },
-        {
-          id: crypto.randomUUID(),
-          tokenNumber: "CHO-0002",
-          queueId: "queue_hosp_opd",
-          customerName: "Seema Jain",
-          phone: "9876543209",
-          priority: 1,
-          serviceType: "Senior Citizen",
-          status: "serving",
-          predictedWaitMinutes: 0,
-          issuedAt: new Date(seedTime - 26 * 60000).toISOString(),
-          servedAt: new Date(seedTime - 3 * 60000).toISOString(),
-          counterNo: 2
-        },
-        {
-          id: crypto.randomUUID(),
-          tokenNumber: "MBS-0001",
-          queueId: "queue_bank",
-          customerName: "Ankit Kapoor",
-          phone: "9898989898",
-          priority: 0,
-          serviceType: "Cash Deposit",
-          status: "waiting",
-          predictedWaitMinutes: 11,
-          issuedAt: new Date(seedTime - 9 * 60000).toISOString()
-        }
-      ];
-    }
-
-    if (db.trafficLogs.length === 0) {
-      db.trafficLogs = db.queues.flatMap((queue) => createSyntheticHistoryForQueue(queue));
-    }
-  });
+function getUser(db, userId) {
+  return db.users.find((u) => u.id === userId);
 }
 
-bootstrap();
+function getPolicyByUser(db, userId) {
+  return db.policies.find((p) => p.userId === userId);
+}
 
 app.get("/", (_req, res) => {
   res.json({
-    service: "SmartQueue AI API",
+    service: "SurakshaPay Backend API",
     status: "ok",
-    version: "1.0.0",
     docs: {
       health: "/health",
-      queues: "/api/queues",
-      issueToken: "/api/tokens/issue",
-      adminAnalytics: "/api/admin/analytics"
+      register: "/api/users/register",
+      dashboard: "/api/dashboard/:userId"
     },
-    time: nowIso()
+    time: now()
   });
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "SmartQueue", time: nowIso() });
+  res.json({ ok: true, service: "SurakshaPay API", time: now() });
 });
 
-app.get("/api/queues", (_req, res) => {
-  const db = readDB();
-
-  const queues = db.queues.map((queue) => {
-    const tokens = db.tokens.filter((token) => token.queueId === queue.id);
-    const waiting = tokens.filter((token) => token.status === "waiting").length;
-    const serving = tokens.filter((token) => token.status === "serving").length;
-    const prediction = predictWaitTime({ queue, tokens: db.tokens, trafficLogs: db.trafficLogs });
-
-    return {
-      ...queue,
-      live: {
-        waiting,
-        serving,
-        totalActive: waiting + serving,
-        predictedWaitMinutes: prediction.estimatedWaitMinutes,
-        confidence: prediction.confidence
-      }
-    };
-  });
-
-  res.json(queues);
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, service: "SurakshaPay API", time: now() });
 });
 
-app.get("/api/queues/:queueId", (req, res) => {
-  const { queueId } = req.params;
-  const db = readDB();
-  const queue = db.queues.find((item) => item.id === queueId);
-
-  if (!queue) return res.status(404).json({ error: "Queue not found." });
-
-  const tokens = db.tokens
-    .filter((token) => token.queueId === queue.id)
-    .sort((a, b) => new Date(a.issuedAt).getTime() - new Date(b.issuedAt).getTime());
-
-  const prediction = predictWaitTime({ queue, tokens: db.tokens, trafficLogs: db.trafficLogs });
-  const insights = getQueueInsights(queue.id, db.trafficLogs);
-
-  res.json({ queue, prediction, insights, tokens });
-});
-
-app.post("/api/queues", (req, res) => {
-  const { name, category, location, counters, avgServiceMinutes, baseTraffic } = req.body;
-
-  if (!name || !category || !location || !counters || !avgServiceMinutes) {
-    return res.status(400).json({
-      error: "name, category, location, counters and avgServiceMinutes are required."
-    });
+app.post("/api/users/register", (req, res) => {
+  const { name, city, platform, weeklyIncome } = req.body;
+  if (!name || !city || !platform || !weeklyIncome) {
+    return res.status(400).json({ error: "name, city, platform and weeklyIncome are required." });
   }
 
-  const created = updateDB((db) => {
-    const queue = {
-      id: crypto.randomUUID(),
+  const user = updateDB((db) => {
+    const id = crypto.randomUUID();
+    const profile = {
+      id,
       name,
-      category,
-      location,
-      counters: Number(counters),
-      avgServiceMinutes: Number(avgServiceMinutes),
-      baseTraffic: Number(baseTraffic || 18),
-      isActive: true,
-      createdAt: nowIso()
+      city,
+      platform,
+      weeklyIncome: Number(weeklyIncome),
+      zone: `${city.toLowerCase()}-central`,
+      deviceId: `dev_${crypto.randomUUID().slice(0, 8)}`,
+      lastActiveAt: now(),
+      createdAt: now()
     };
-
-    db.queues.push(queue);
-    db.trafficLogs.push(...createSyntheticHistoryForQueue(queue, 45));
-    return queue;
+    db.users.push(profile);
+    return profile;
   });
 
-  res.status(201).json(created);
+  return res.status(201).json(user);
 });
 
-app.patch("/api/queues/:queueId/status", (req, res) => {
-  const { queueId } = req.params;
-  const { isActive } = req.body;
+app.get("/api/users/register", (_req, res) => {
+  return res.status(405).json({
+    error: "Method Not Allowed",
+    message: "Use POST /api/users/register with JSON body: { name, city, platform, weeklyIncome }"
+  });
+});
 
-  if (typeof isActive !== "boolean") {
-    return res.status(400).json({ error: "isActive must be boolean." });
+app.post("/api/policies/create/:userId", (req, res) => {
+  const { userId } = req.params;
+  const db = readDB();
+  const user = getUser(db, userId);
+  if (!user) return res.status(404).json({ error: "User not found." });
+
+  const existing = getPolicyByUser(db, userId);
+  if (existing) return res.json(existing);
+
+  const claimHistory = db.claims.filter((c) => c.userId === userId);
+  const suspiciousCount = claimHistory.filter((c) => c.fraudScore > 0.5).length;
+  const riskScore = calculateRiskScore({
+    city: user.city,
+    claimCount: claimHistory.length,
+    suspiciousCount
+  });
+  const premium = calculatePremium(user.weeklyIncome, riskScore);
+  const coverageAmount = computeCoverage(user.weeklyIncome);
+
+  const policy = updateDB((mutable) => {
+    const created = {
+      id: crypto.randomUUID(),
+      userId,
+      riskScore,
+      premium,
+      coverageAmount,
+      status: "Inactive",
+      exclusions: [
+        "War / Armed Conflict / Riots",
+        "Pandemics (e.g., COVID-19)",
+        "Nationwide lockdowns",
+        "Platform-wide outages",
+        "Large-scale disasters (earthquakes, cyclones)"
+      ],
+      complianceNotes: {
+        moralHazard: "Coverage capped at 70%; no payout for inactivity before trigger; repeated claims monitored.",
+        basisRisk: "Zone-based and shift-time aligned trigger validation with multi-factor checks.",
+        failSafe: "Verification buffer, duplicate-claim lock, and manual review for high fraud score."
+      },
+      createdAt: now(),
+      updatedAt: now()
+    };
+
+    mutable.policies.push(created);
+    mutable.riskScores.push({
+      id: crypto.randomUUID(),
+      userId,
+      value: riskScore,
+      generatedAt: now()
+    });
+    return created;
+  });
+
+  return res.status(201).json(policy);
+});
+
+app.post("/api/policies/:policyId/activate", (req, res) => {
+  const { policyId } = req.params;
+  const updated = updateDB((db) => {
+    const policy = db.policies.find((p) => p.id === policyId);
+    if (!policy) return null;
+    policy.status = "Active";
+    policy.updatedAt = now();
+    return policy;
+  });
+  if (!updated) return res.status(404).json({ error: "Policy not found." });
+  return res.json(updated);
+});
+
+app.post("/api/policies/:policyId/deactivate", (req, res) => {
+  const { policyId } = req.params;
+  const updated = updateDB((db) => {
+    const policy = db.policies.find((p) => p.id === policyId);
+    if (!policy) return null;
+    policy.status = "Inactive";
+    policy.updatedAt = now();
+    return policy;
+  });
+  if (!updated) return res.status(404).json({ error: "Policy not found." });
+  return res.json(updated);
+});
+
+app.patch("/api/policies/:policyId/status", (req, res) => {
+  const { policyId } = req.params;
+  const { status } = req.body;
+  if (!["Active", "Inactive"].includes(status)) {
+    return res.status(400).json({ error: "status must be Active or Inactive." });
   }
 
   const updated = updateDB((db) => {
-    const queue = db.queues.find((item) => item.id === queueId);
-    if (!queue) return null;
-
-    queue.isActive = isActive;
-    queue.updatedAt = nowIso();
-    return queue;
+    const policy = db.policies.find((p) => p.id === policyId);
+    if (!policy) return null;
+    policy.status = status;
+    policy.updatedAt = now();
+    return policy;
   });
 
-  if (!updated) return res.status(404).json({ error: "Queue not found." });
-
-  res.json(updated);
+  if (!updated) return res.status(404).json({ error: "Policy not found." });
+  return res.json(updated);
 });
 
-app.post("/api/tokens/issue", (req, res) => {
-  const { queueId, customerName, phone, serviceType, priority = 0 } = req.body;
+app.post("/api/activity/:userId", (req, res) => {
+  const { userId } = req.params;
+  const { deviceId } = req.body;
 
-  if (!queueId || !customerName) {
-    return res.status(400).json({ error: "queueId and customerName are required." });
+  const updated = updateDB((db) => {
+    const user = getUser(db, userId);
+    if (!user) return null;
+    user.lastActiveAt = now();
+    if (deviceId) user.deviceId = deviceId;
+    return user;
+  });
+
+  if (!updated) return res.status(404).json({ error: "User not found." });
+  return res.json({ success: true, lastActiveAt: updated.lastActiveAt });
+});
+
+app.get("/api/dashboard/:userId", (req, res) => {
+  const { userId } = req.params;
+  const db = readDB();
+  const user = getUser(db, userId);
+  const policy = getPolicyByUser(db, userId);
+  const claims = db.claims.filter((c) => c.userId === userId).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+
+  if (!user) return res.status(404).json({ error: "User not found." });
+  if (!policy) return res.status(404).json({ error: "Policy not found. Create policy first." });
+
+  return res.json({
+    user,
+    policy,
+    latestClaim: claims[0] ?? null,
+    claimCount: claims.length
+  });
+});
+
+app.get("/api/policies/user/:userId", (req, res) => {
+  const { userId } = req.params;
+  const db = readDB();
+  const policy = getPolicyByUser(db, userId);
+  if (!policy) return res.status(404).json({ error: "Policy not found." });
+  return res.json(policy);
+});
+
+app.post("/api/triggers/simulate", (req, res) => {
+  const { type, city } = req.body;
+  if (!type || !city) return res.status(400).json({ error: "type and city are required." });
+
+  const payload = {
+    id: crypto.randomUUID(),
+    type,
+    city,
+    rainfallMm: req.body.rainfallMm ?? (type === "rain" ? 42 : 0),
+    aqi: req.body.aqi ?? (type === "aqi" ? 380 : 120),
+    temperatureC: req.body.temperatureC ?? (type === "heatwave" ? 46 : 33),
+    curfewAlert: req.body.curfewAlert ?? type === "curfew",
+    floodAlert: req.body.floodAlert ?? type === "flood",
+    timeAlignedWithShift: req.body.timeAlignedWithShift ?? true,
+    triggeredAt: now(),
+    verificationBufferSeconds: 45
+  };
+
+  if (checkExclusion(type)) {
+    return res.status(422).json({ error: "This event type is excluded from coverage." });
+  }
+  if (!isTriggerQualified(payload)) {
+    return res.status(422).json({ error: "Trigger threshold not met." });
   }
 
-  const created = updateDB((db) => {
-    const queue = db.queues.find((item) => item.id === queueId);
-    if (!queue) return { error: "Queue not found." };
-    if (!queue.isActive) return { error: "Queue is inactive." };
+  const summary = updateDB((db) => {
+    db.triggers.push(payload);
+    const usersInCity = db.users.filter((u) => u.city === city);
+    const processedClaims = [];
 
-    const queueTokens = db.tokens.filter((token) => token.queueId === queueId);
-    const prediction = predictWaitTime({ queue, tokens: db.tokens, trafficLogs: db.trafficLogs, priority: Number(priority) });
+    for (const user of usersInCity) {
+      const policy = getPolicyByUser(db, user.id);
+      if (!policy || policy.status !== "Active") continue;
 
-    const token = {
-      id: crypto.randomUUID(),
-      tokenNumber: generateTokenNumber(queue.name, queueTokens.length),
-      queueId,
-      customerName,
-      phone: phone || "",
-      serviceType: serviceType || "General",
-      priority: Number(priority),
-      status: "waiting",
-      predictedWaitMinutes: prediction.estimatedWaitMinutes,
-      predictionConfidence: prediction.confidence,
-      issuedAt: nowIso()
-    };
+      const duplicateClaim = db.claims.some(
+        (claim) => claim.userId === user.id && claim.triggerType === type && claim.claimWindowId === payload.id
+      );
+      if (duplicateClaim) continue;
 
-    db.tokens.push(token);
+      const eligibleByActivity = isActivityEligible(user.lastActiveAt);
+      const validBasisRisk = basisRiskValidation(payload, user);
+      const claimsLast30d = db.claims.filter((c) => {
+        if (c.userId !== user.id) return false;
+        const delta = Date.now() - new Date(c.createdAt).getTime();
+        return delta <= 1000 * 60 * 60 * 24 * 30;
+      }).length;
+
+      const fraudScore = fraudScoreForClaim({
+        user,
+        triggerCity: city,
+        claimCountLast30d: claimsLast30d,
+        duplicateAttempt: duplicateClaim,
+        expectedDeviceId: req.body.deviceId || user.deviceId
+      });
+
+      const payoutDetails = estimatePayout(user.weeklyIncome, policy.coverageAmount, type);
+      const manualReview = shouldManualReview(fraudScore);
+      const policyActive = policy.status === "Active";
+
+      let status = "Rejected";
+      let reason = "Activity criteria not met before trigger.";
+      if (!policyActive) reason = "Policy inactive.";
+      else if (!validBasisRisk) reason = "Basis risk checks failed.";
+      else if (manualReview) {
+        status = "Pending";
+        reason = "High fraud score; sent for manual review.";
+      } else if (eligibleByActivity) {
+        status = "Approved";
+        reason = "Auto-processed";
+      }
+
+      const claim = {
+        id: crypto.randomUUID(),
+        userId: user.id,
+        policyId: policy.id,
+        triggerType: type,
+        triggerSnapshot: payload,
+        claimWindowId: payload.id,
+        status,
+        payoutAmount: status === "Approved" ? payoutDetails.payout : 0,
+        estimatedLoss: payoutDetails.estimatedLoss,
+        hoursLost: payoutDetails.hoursLost,
+        fraudScore,
+        fraudStatus: manualReview ? "Under Review" : "Fraud Check Passed",
+        reason,
+        createdAt: now(),
+        processedAt: now(),
+        verificationReadyAt: new Date(Date.now() + payload.verificationBufferSeconds * 1000).toISOString()
+      };
+
+      db.claims.push(claim);
+      processedClaims.push(claim);
+    }
 
     return {
-      token,
-      prediction
+      trigger: payload,
+      processedClaims,
+      claimCount: processedClaims.length
     };
   });
 
-  if (created.error) return res.status(404).json({ error: created.error });
-
-  res.status(201).json(created);
+  return res.status(201).json(summary);
 });
 
-app.post("/api/queues/:queueId/serve-next", (req, res) => {
-  const { queueId } = req.params;
-  const { counterNo = 1 } = req.body;
-
-  const served = updateDB((db) => {
-    const queue = db.queues.find((item) => item.id === queueId);
-    if (!queue) return { error: "Queue not found." };
-
-    const nextWaiting = db.tokens
-      .filter((token) => token.queueId === queueId && token.status === "waiting")
-      .sort((a, b) => {
-        if (a.priority !== b.priority) return b.priority - a.priority;
-        return new Date(a.issuedAt).getTime() - new Date(b.issuedAt).getTime();
-      })[0];
-
-    if (!nextWaiting) return { error: "No waiting token in this queue." };
-
-    nextWaiting.status = "serving";
-    nextWaiting.servedAt = nowIso();
-    nextWaiting.counterNo = Number(counterNo);
-    nextWaiting.predictedWaitMinutes = 0;
-
-    return nextWaiting;
-  });
-
-  if (served.error) return res.status(404).json({ error: served.error });
-
-  res.json(served);
-});
-
-app.post("/api/tokens/:tokenId/complete", (req, res) => {
-  const { tokenId } = req.params;
-
-  const completed = updateDB((db) => {
-    const token = db.tokens.find((item) => item.id === tokenId);
-    if (!token) return null;
-
-    token.status = "completed";
-    token.completedAt = nowIso();
-    return token;
-  });
-
-  if (!completed) return res.status(404).json({ error: "Token not found." });
-
-  res.json(completed);
-});
-
-app.get("/api/tokens", (req, res) => {
-  const { queueId, status } = req.query;
+app.get("/api/triggers/latest/:city", (req, res) => {
+  const { city } = req.params;
   const db = readDB();
-
-  const list = db.tokens
-    .filter((token) => (queueId ? token.queueId === queueId : true))
-    .filter((token) => (status ? token.status === status : true))
-    .sort((a, b) => new Date(a.issuedAt).getTime() - new Date(b.issuedAt).getTime());
-
-  res.json(list);
+  const latest = [...db.triggers]
+    .filter((t) => t.city.toLowerCase() === city.toLowerCase())
+    .sort((a, b) => (a.triggeredAt < b.triggeredAt ? 1 : -1))[0];
+  return res.json(latest ?? null);
 });
 
-app.get("/api/predictions/:queueId", (req, res) => {
-  const { queueId } = req.params;
+app.get("/api/triggers", (_req, res) => {
   const db = readDB();
-  const queue = db.queues.find((item) => item.id === queueId);
-
-  if (!queue) return res.status(404).json({ error: "Queue not found." });
-
-  const prediction = predictWaitTime({ queue, tokens: db.tokens, trafficLogs: db.trafficLogs });
-  const insights = getQueueInsights(queue.id, db.trafficLogs);
-
-  res.json({ queueId, queueName: queue.name, prediction, insights });
+  const triggers = [...db.triggers].sort((a, b) => (a.triggeredAt < b.triggeredAt ? 1 : -1));
+  return res.json(triggers);
 });
 
-app.get("/api/recommendations/:queueId", (req, res) => {
-  const { queueId } = req.params;
+app.get("/api/claims", (req, res) => {
+  const { userId } = req.query;
   const db = readDB();
-  const queue = db.queues.find((item) => item.id === queueId);
-
-  if (!queue) return res.status(404).json({ error: "Queue not found." });
-
-  const waitForecastNow = predictWaitTime({ queue, tokens: db.tokens, trafficLogs: db.trafficLogs });
-  const queueInsights = getQueueInsights(queue.id, db.trafficLogs);
-
-  const response = buildRecommendationCopy({ queue, queueInsights, waitForecastNow });
-  res.json(response);
+  const claims = db.claims
+    .filter((c) => (userId ? c.userId === userId : true))
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return res.json(claims);
 });
 
-app.get("/api/admin/analytics", (_req, res) => {
+app.get("/api/claims/:userId", (req, res) => {
+  const { userId } = req.params;
   const db = readDB();
-  const analytics = buildAdminAnalytics({
-    queues: db.queues,
-    tokens: db.tokens,
-    trafficLogs: db.trafficLogs
+  const claims = db.claims.filter((c) => c.userId === userId).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return res.json(claims);
+});
+
+app.get("/api/fraud/:userId", (req, res) => {
+  const { userId } = req.params;
+  const db = readDB();
+  const claims = db.claims.filter((c) => c.userId === userId);
+  const latest = claims.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
+
+  return res.json({
+    userId,
+    latestFraudScore: latest?.fraudScore ?? 0,
+    status: latest?.fraudStatus ?? "Fraud Check Passed",
+    signalSummary:
+      latest?.fraudScore > 0.75
+        ? "Location/device/claim pattern anomaly detected."
+        : "No suspicious claim pattern detected."
   });
-
-  res.json(analytics);
 });
 
-app.post("/api/simulate/traffic", (req, res) => {
-  const { queueId, tokensIssued, avgWaitMinutes, hour } = req.body;
-
-  if (!queueId || !tokensIssued || !avgWaitMinutes) {
-    return res.status(400).json({ error: "queueId, tokensIssued and avgWaitMinutes are required." });
-  }
-
-  const created = updateDB((db) => {
-    const queue = db.queues.find((item) => item.id === queueId);
-    if (!queue) return null;
-
-    const now = new Date();
-    if (typeof hour === "number") now.setHours(hour, 0, 0, 0);
-
-    const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][now.getDay()];
-
-    const log = {
-      id: crypto.randomUUID(),
-      queueId,
-      timestamp: now.toISOString(),
-      dayName,
-      hour: now.getHours(),
-      tokensIssued: Number(tokensIssued),
-      avgWaitMinutes: Number(avgWaitMinutes)
-    };
-
-    db.trafficLogs.push(log);
-    return log;
+app.get("/api/fraud-check/:userId", (req, res) => {
+  const { userId } = req.params;
+  const db = readDB();
+  const claims = db.claims.filter((c) => c.userId === userId);
+  const latest = claims.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
+  return res.json({
+    userId,
+    fraudScore: latest?.fraudScore ?? 0,
+    status: latest?.fraudStatus ?? "Fraud Check Passed",
+    signalSummary:
+      latest?.fraudScore > 0.75
+        ? "Location/device/claim pattern anomaly detected."
+        : "No suspicious claim pattern detected."
   });
+});
 
-  if (!created) return res.status(404).json({ error: "Queue not found." });
+app.get("/api/admin/overview", (_req, res) => {
+  const db = readDB();
+  const approved = db.claims.filter((c) => c.status === "Approved");
+  const underReview = db.claims.filter((c) => c.status === "Pending");
+  const totalPayout = approved.reduce((sum, c) => sum + c.payoutAmount, 0);
 
-  res.status(201).json(created);
+  return res.json({
+    totals: {
+      users: db.users.length,
+      activePolicies: db.policies.filter((p) => p.status === "Active").length,
+      claims: db.claims.length,
+      underReview: underReview.length,
+      totalPayout: Number(totalPayout.toFixed(2))
+    },
+    fraudAlerts: underReview.slice(0, 20),
+    riskHeatmap: db.users.map((u) => ({
+      city: u.city,
+      userId: u.id,
+      riskScore: db.policies.find((p) => p.userId === u.id)?.riskScore ?? 0
+    }))
+  });
+});
+
+app.get("/api/admin/stats", (_req, res) => {
+  const db = readDB();
+  const approved = db.claims.filter((c) => c.status === "Approved");
+  const underReview = db.claims.filter((c) => c.status === "Pending");
+  const totalPayout = approved.reduce((sum, c) => sum + c.payoutAmount, 0);
+
+  return res.json({
+    users: db.users.length,
+    activePolicies: db.policies.filter((p) => p.status === "Active").length,
+    totalClaims: db.claims.length,
+    underReview: underReview.length,
+    totalPayout: Number(totalPayout.toFixed(2))
+  });
+});
+
+app.get("/api/admin/risk-heatmap", (_req, res) => {
+  const db = readDB();
+  return res.json(
+    db.users.map((u) => ({
+      city: u.city,
+      zone: u.zone,
+      userId: u.id,
+      riskScore: db.policies.find((p) => p.userId === u.id)?.riskScore ?? 0
+    }))
+  );
 });
 
 export default app;
