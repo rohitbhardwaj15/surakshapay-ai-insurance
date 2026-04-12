@@ -9,9 +9,11 @@ import {
   getBehavioralDiscount,
   evaluateTrigger,
   processClaimAutomation,
+  simulatePayout,
   getWorkRecommendation,
   getAdaptiveCoverage,
-  buildAdminAnalytics
+  buildAdminAnalytics,
+  getAdminStats
 } from "./engine.js";
 
 const app = express();
@@ -257,6 +259,7 @@ app.post("/api/claim/process", (req, res) => {
       decision:     claimResult.decision,
       processedAt:  nowIso()
     };
+    claim.payout = simulatePayout(claim.payoutAmount);
 
     db.claims.push(claim);
 
@@ -336,6 +339,16 @@ app.get("/api/admin/analytics", (_req, res) => {
     claims:   db.claims,
     triggers: db.triggers
   }));
+});
+
+app.get("/api/admin/stats", (_req, res) => {
+  const db = readDB();
+  const stats = getAdminStats({
+    users: db.riders,
+    policies: db.policies,
+    claims: db.claims
+  });
+  res.json(stats);
 });
 
 export default app;
