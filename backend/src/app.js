@@ -97,7 +97,13 @@ app.post("/api/users/register", (req, res) => {
     return newRider;
   });
 
-  res.status(201).json(rider);
+  // Keep backward compatibility for both clients:
+  // 1) expects response.user
+  // 2) expects flat rider fields at root
+  res.status(201).json({
+    user: rider,
+    ...rider
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
