@@ -13,16 +13,6 @@ function clamp(min, val, max) {
   return Math.max(min, Math.min(val, max));
 }
 
-// Payout rail simulation for instant settlement UX.
-export function simulatePayout(amount) {
-  return {
-    status: "success",
-    method: "UPI",
-    time: "2 minutes",
-    amount: Math.max(0, Number(amount) || 0)
-  };
-}
-
 // ─── 1. Risk Score (0.0 – 1.0) ────────────────────────────────────────────────
 // Combines city exposure + income band + historical disruption weight
 export function calculateRiskScore({ city, weeklyIncome }) {
@@ -93,17 +83,6 @@ function computeFraudScore({ rider, activeTriggers }) {
   if (activeTriggers.length === 1 && activeTriggers[0].type === "temperature") {
     score += 0.10;
   }
-
-  // Extra fraud signals (as requested): device change, location jump, time mismatch.
-  if (rider.deviceChanged) score += 0.20;
-  if ((Number(rider.locationJump) || 0) > 20) score += 0.20;
-  const hasTimeMismatch = activeTriggers.some(
-    (trigger) =>
-      trigger?.time &&
-      rider?.activity?.activeHours &&
-      trigger.time !== rider.activity.activeHours
-  );
-  if (hasTimeMismatch) score += 0.20;
 
   return parseFloat(clamp(0, score, 1).toFixed(3));
 }
@@ -248,29 +227,5 @@ export function buildAdminAnalytics({ riders, policies, claims, triggers }) {
     },
     activeTriggers,
     recentClaims: claims.slice(-5).reverse()
-  };
-}
-
-// Lightweight stats object for admin dashboard cards.
-export function getAdminStats(data) {
-  const users = data?.users || data?.riders || [];
-  const policies = data?.policies || [];
-  const claims = data?.claims || [];
-  const totalPayout =
-    Number(data?.totalPayout) ||
-    claims
-      .filter((c) => c.status === "approved")
-      .reduce((sum, c) => sum + (Number(c.payoutAmount) || 0), 0);
-  const totalPremium =
-    Number(data?.totalPremium) ||
-    policies
-      .filter((p) => p.active || p.status === "active")
-      .reduce((sum, p) => sum + (Number(p.premium) || 0), 0);
-
-  return {
-    totalUsers: users.length,
-    activePolicies: policies.filter((p) => p.active || p.status === "active").length,
-    totalClaims: claims.length,
-    lossRatio: totalPremium > 0 ? totalPayout / totalPremium : 0
   };
 }

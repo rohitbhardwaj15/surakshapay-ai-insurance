@@ -9,11 +9,9 @@ import {
   getBehavioralDiscount,
   evaluateTrigger,
   processClaimAutomation,
-  simulatePayout,
   getWorkRecommendation,
   getAdaptiveCoverage,
-  buildAdminAnalytics,
-  getAdminStats
+  buildAdminAnalytics
 } from "./engine.js";
 
 const app = express();
@@ -97,13 +95,7 @@ app.post("/api/users/register", (req, res) => {
     return newRider;
   });
 
-  // Keep backward compatibility for both clients:
-  // 1) expects response.user
-  // 2) expects flat rider fields at root
-  res.status(201).json({
-    user: rider,
-    ...rider
-  });
+  res.status(201).json(rider);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -265,7 +257,6 @@ app.post("/api/claim/process", (req, res) => {
       decision:     claimResult.decision,
       processedAt:  nowIso()
     };
-    claim.payout = simulatePayout(claim.payoutAmount);
 
     db.claims.push(claim);
 
@@ -345,16 +336,6 @@ app.get("/api/admin/analytics", (_req, res) => {
     claims:   db.claims,
     triggers: db.triggers
   }));
-});
-
-app.get("/api/admin/stats", (_req, res) => {
-  const db = readDB();
-  const stats = getAdminStats({
-    users: db.riders,
-    policies: db.policies,
-    claims: db.claims
-  });
-  res.json(stats);
 });
 
 export default app;
