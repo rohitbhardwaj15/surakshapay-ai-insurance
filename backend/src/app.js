@@ -1,491 +1,341 @@
 import crypto from "crypto";
+import cors   from "cors";
 import express from "express";
-import cors from "cors";
-import {
-  basisRiskValidation,
-  calculatePremium,
-  calculateRiskScore,
-  checkExclusion,
-  computeCoverage,
-  estimatePayout,
-  fraudScoreForClaim,
-  isActivityEligible,
-  isTriggerQualified,
-  shouldManualReview
-} from "./engine.js";
+
 import { readDB, updateDB } from "./store.js";
+import {
+  calculateRiskScore,
+  calculatePremium,
+  getBehavioralDiscount,
+  evaluateTrigger,
+  processClaimAutomation,
+  getWorkRecommendation,
+  getAdaptiveCoverage,
+  buildAdminAnalytics
+} from "./engine.js";
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-function now() {
+function nowIso() {
   return new Date().toISOString();
 }
 
-function getUser(db, userId) {
-  return db.users.find((u) => u.id === userId);
-}
-
-function getPolicyByUser(db, userId) {
-  return db.policies.find((p) => p.userId === userId);
-}
+// ═══════════════════════════════════════════════════════════════════════════════
+// ROOT & HEALTH
+// ═══════════════════════════════════════════════════════════════════════════════
 
 app.get("/", (_req, res) => {
   res.json({
     service: "SurakshaPay Backend API",
-    status: "ok",
+    status:  "ok",
+    version: "2.0.0",
     docs: {
-      health: "/health",
-      register: "/api/users/register",
-      dashboard: "/api/dashboard/:userId"
+      health:           "/health",
+      register:         "POST /api/users/register",
+      dashboard:        "GET  /api/dashboard/:userId",
+      activatePolicy:   "POST /api/policy/activate",
+      simulateTrigger:  "POST /api/trigger/simulate",
+      getTriggers:      "GET  /api/triggers",
+      processClaim:     "POST /api/claim/process",
+      getClaims:        "GET  /api/claims",
+      recommendation:   "GET  /api/recommendation/:userId",
+      adminAnalytics:   "GET  /api/admin/analytics"
     },
-    time: now()
+    time: nowIso()
   });
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "SurakshaPay API", time: now() });
+  res.json({ ok: true, service: "SurakshaPay", time: nowIso() });
 });
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "SurakshaPay API", time: now() });
-});
+// ═══════════════════════════════════════════════════════════════════════════════
+// RIDER REGISTRATION
+// POST /api/users/register
+// Body: { name, city, platform, weeklyIncome, phone? }
+// ═══════════════════════════════════════════════════════════════════════════════
 
 app.post("/api/users/register", (req, res) => {
-  const { name, city, platform, weeklyIncome } = req.body;
+  const { name, city, platform, weeklyIncome, phone } = req.body;
+
   if (!name || !city || !platform || !weeklyIncome) {
-    return res.status(400).json({ error: "name, city, platform and weeklyIncome are required." });
+    return res.status(400).json({
+      error: "name, city, platform, and weeklyIncome are required."
+    });
   }
 
-  const result = updateDB((db) => {
-    const id = crypto.randomUUID();
-    const user = {
-      id,
+  const rider = updateDB((db) => {
+    const riskScore        = calculateRiskScore({ city, weeklyIncome });
+    const basePremium      = calculatePremium({ riskScore, weeklyIncome });
+    const behavDiscount    = getBehavioralDiscount({ claimsHistory: [] });
+    const premium          = Math.max(1, basePremium - behavDiscount);
+    const coverage         = Math.round(Number(weeklyIncome) * 0.70); // 70% cap
+
+    const newRider = {
+      id:                 crypto.randomUUID(),
       name,
       city,
       platform,
-      weeklyIncome: Number(weeklyIncome),
-      zone: `${city.toLowerCase()}-central`,
-      deviceId: `dev_${crypto.randomUUID().slice(0, 8)}`,
-      lastActiveAt: now(),
-      createdAt: now()
-    };
-    db.users.push(user);
-
-    // Create default policy at registration so dashboard can load immediately.
-    const riskScore = calculateRiskScore({
-      city: user.city,
-      claimCount: 0,
-      suspiciousCount: 0
-    });
-    const policy = {
-      id: crypto.randomUUID(),
-      userId: user.id,
+      weeklyIncome:       Number(weeklyIncome),
+      phone:              phone || "",
       riskScore,
-      premium: calculatePremium(user.weeklyIncome, riskScore),
-      coverageAmount: computeCoverage(user.weeklyIncome),
-      status: "Inactive",
-      exclusions: [
-        "War / Armed Conflict / Riots",
-        "Pandemics (e.g., COVID-19)",
-        "Nationwide lockdowns",
-        "Platform-wide outages",
-        "Large-scale disasters (earthquakes, cyclones)"
-      ],
-      complianceNotes: {
-        moralHazard: "Coverage capped at 70%; no payout for inactivity before trigger; repeated claims monitored.",
-        basisRisk: "Zone-based and shift-time aligned trigger validation with multi-factor checks.",
-        failSafe: "Verification buffer, duplicate-claim lock, and manual review for high fraud score."
-      },
-      createdAt: now(),
-      updatedAt: now()
-    };
-    db.policies.push(policy);
-    db.riskScores.push({
-      id: crypto.randomUUID(),
-      userId: user.id,
-      value: riskScore,
-      generatedAt: now()
-    });
-
-    return { user, policy };
-  });
-
-  return res.status(201).json({
-    user: result.user,
-    policy: result.policy,
-    ...result.user
-  });
-});
-
-app.get("/api/users/register", (_req, res) => {
-  return res.status(405).json({
-    error: "Method Not Allowed",
-    message: "Use POST /api/users/register with JSON body: { name, city, platform, weeklyIncome }"
-  });
-});
-
-app.post("/api/policies/create/:userId", (req, res) => {
-  const { userId } = req.params;
-  const db = readDB();
-  const user = getUser(db, userId);
-  if (!user) return res.status(404).json({ error: "User not found." });
-
-  const existing = getPolicyByUser(db, userId);
-  if (existing) return res.json(existing);
-
-  const claimHistory = db.claims.filter((c) => c.userId === userId);
-  const suspiciousCount = claimHistory.filter((c) => c.fraudScore > 0.5).length;
-  const riskScore = calculateRiskScore({
-    city: user.city,
-    claimCount: claimHistory.length,
-    suspiciousCount
-  });
-  const premium = calculatePremium(user.weeklyIncome, riskScore);
-  const coverageAmount = computeCoverage(user.weeklyIncome);
-
-  const policy = updateDB((mutable) => {
-    const created = {
-      id: crypto.randomUUID(),
-      userId,
-      riskScore,
+      basePremium,
+      behavioralDiscount: behavDiscount,
       premium,
-      coverageAmount,
-      status: "Inactive",
-      exclusions: [
-        "War / Armed Conflict / Riots",
-        "Pandemics (e.g., COVID-19)",
-        "Nationwide lockdowns",
-        "Platform-wide outages",
-        "Large-scale disasters (earthquakes, cyclones)"
-      ],
-      complianceNotes: {
-        moralHazard: "Coverage capped at 70%; no payout for inactivity before trigger; repeated claims monitored.",
-        basisRisk: "Zone-based and shift-time aligned trigger validation with multi-factor checks.",
-        failSafe: "Verification buffer, duplicate-claim lock, and manual review for high fraud score."
-      },
-      createdAt: now(),
-      updatedAt: now()
+      coverage,
+      claimsHistory:      [],
+      hoursWorked:        [],
+      createdAt:          nowIso()
     };
 
-    mutable.policies.push(created);
-    mutable.riskScores.push({
-      id: crypto.randomUUID(),
-      userId,
-      value: riskScore,
-      generatedAt: now()
-    });
-    return created;
+    db.riders.push(newRider);
+    return newRider;
   });
 
-  return res.status(201).json(policy);
+  res.status(201).json(rider);
 });
 
-app.post("/api/policies/:policyId/activate", (req, res) => {
-  const { policyId } = req.params;
-  const updated = updateDB((db) => {
-    const policy = db.policies.find((p) => p.id === policyId);
-    if (!policy) return null;
-    policy.status = "Active";
-    policy.updatedAt = now();
-    return policy;
-  });
-  if (!updated) return res.status(404).json({ error: "Policy not found." });
-  return res.json(updated);
-});
-
-app.post("/api/policies/:policyId/deactivate", (req, res) => {
-  const { policyId } = req.params;
-  const updated = updateDB((db) => {
-    const policy = db.policies.find((p) => p.id === policyId);
-    if (!policy) return null;
-    policy.status = "Inactive";
-    policy.updatedAt = now();
-    return policy;
-  });
-  if (!updated) return res.status(404).json({ error: "Policy not found." });
-  return res.json(updated);
-});
-
-app.patch("/api/policies/:policyId/status", (req, res) => {
-  const { policyId } = req.params;
-  const { status } = req.body;
-  if (!["Active", "Inactive"].includes(status)) {
-    return res.status(400).json({ error: "status must be Active or Inactive." });
-  }
-
-  const updated = updateDB((db) => {
-    const policy = db.policies.find((p) => p.id === policyId);
-    if (!policy) return null;
-    policy.status = status;
-    policy.updatedAt = now();
-    return policy;
-  });
-
-  if (!updated) return res.status(404).json({ error: "Policy not found." });
-  return res.json(updated);
-});
-
-app.post("/api/activity/:userId", (req, res) => {
-  const { userId } = req.params;
-  const { deviceId } = req.body;
-
-  const updated = updateDB((db) => {
-    const user = getUser(db, userId);
-    if (!user) return null;
-    user.lastActiveAt = now();
-    if (deviceId) user.deviceId = deviceId;
-    return user;
-  });
-
-  if (!updated) return res.status(404).json({ error: "User not found." });
-  return res.json({ success: true, lastActiveAt: updated.lastActiveAt });
-});
+// ═══════════════════════════════════════════════════════════════════════════════
+// DASHBOARD
+// GET /api/dashboard/:userId
+// ═══════════════════════════════════════════════════════════════════════════════
 
 app.get("/api/dashboard/:userId", (req, res) => {
   const { userId } = req.params;
   const db = readDB();
-  const user = getUser(db, userId);
-  const policy = getPolicyByUser(db, userId);
-  const claims = db.claims.filter((c) => c.userId === userId).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 
-  if (!user) return res.status(404).json({ error: "User not found." });
-  if (!policy) return res.status(404).json({ error: "Policy not found. Create policy first." });
+  const rider = db.riders.find((r) => r.id === userId);
+  if (!rider) return res.status(404).json({ error: "Rider not found." });
 
-  return res.json({
-    user,
-    policy,
-    latestClaim: claims[0] ?? null,
-    claimCount: claims.length
-  });
+  const policy         = db.policies.find((p) => p.riderId === userId && p.status === "active") || null;
+  const claims         = db.claims.filter((c) => c.riderId === userId);
+  const triggers       = db.triggers;
+  const recommendation = getWorkRecommendation({ rider, triggers });
+  const adaptiveCoverage = policy ? getAdaptiveCoverage({ rider, policy, triggers }) : null;
+
+  res.json({ rider, policy, claims, triggers, recommendation, adaptiveCoverage });
 });
 
-app.get("/api/policies/user/:userId", (req, res) => {
-  const { userId } = req.params;
+// ═══════════════════════════════════════════════════════════════════════════════
+// LIST ALL RIDERS (admin)
+// GET /api/users
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get("/api/users", (_req, res) => {
   const db = readDB();
-  const policy = getPolicyByUser(db, userId);
-  if (!policy) return res.status(404).json({ error: "Policy not found." });
-  return res.json(policy);
+  res.json(db.riders);
 });
 
-app.post("/api/triggers/simulate", (req, res) => {
-  const { type, city } = req.body;
-  if (!type || !city) return res.status(400).json({ error: "type and city are required." });
+// ═══════════════════════════════════════════════════════════════════════════════
+// ACTIVATE POLICY
+// POST /api/policy/activate
+// Body: { userId }
+// ═══════════════════════════════════════════════════════════════════════════════
 
-  const payload = {
-    id: crypto.randomUUID(),
-    type,
-    city,
-    rainfallMm: req.body.rainfallMm ?? (type === "rain" ? 42 : 0),
-    aqi: req.body.aqi ?? (type === "aqi" ? 380 : 120),
-    temperatureC: req.body.temperatureC ?? (type === "heatwave" ? 46 : 33),
-    curfewAlert: req.body.curfewAlert ?? type === "curfew",
-    floodAlert: req.body.floodAlert ?? type === "flood",
-    timeAlignedWithShift: req.body.timeAlignedWithShift ?? true,
-    triggeredAt: now(),
-    verificationBufferSeconds: 45
-  };
+app.post("/api/policy/activate", (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: "userId is required." });
 
-  if (checkExclusion(type)) {
-    return res.status(422).json({ error: "This event type is excluded from coverage." });
-  }
-  if (!isTriggerQualified(payload)) {
-    return res.status(422).json({ error: "Trigger threshold not met." });
-  }
+  const result = updateDB((db) => {
+    const rider = db.riders.find((r) => r.id === userId);
+    if (!rider) return { error: "Rider not found." };
 
-  const summary = updateDB((db) => {
-    db.triggers.push(payload);
-    const usersInCity = db.users.filter((u) => u.city === city);
-    const processedClaims = [];
+    const existing = db.policies.find((p) => p.riderId === userId && p.status === "active");
+    if (existing) return { error: "Policy already active.", policy: existing };
 
-    for (const user of usersInCity) {
-      const policy = getPolicyByUser(db, user.id);
-      if (!policy || policy.status !== "Active") continue;
-
-      const duplicateClaim = db.claims.some(
-        (claim) => claim.userId === user.id && claim.triggerType === type && claim.claimWindowId === payload.id
-      );
-      if (duplicateClaim) continue;
-
-      const eligibleByActivity = isActivityEligible(user.lastActiveAt);
-      const validBasisRisk = basisRiskValidation(payload, user);
-      const claimsLast30d = db.claims.filter((c) => {
-        if (c.userId !== user.id) return false;
-        const delta = Date.now() - new Date(c.createdAt).getTime();
-        return delta <= 1000 * 60 * 60 * 24 * 30;
-      }).length;
-
-      const fraudScore = fraudScoreForClaim({
-        user,
-        triggerCity: city,
-        claimCountLast30d: claimsLast30d,
-        duplicateAttempt: duplicateClaim,
-        expectedDeviceId: req.body.deviceId || user.deviceId
-      });
-
-      const payoutDetails = estimatePayout(user.weeklyIncome, policy.coverageAmount, type);
-      const manualReview = shouldManualReview(fraudScore);
-      const policyActive = policy.status === "Active";
-
-      let status = "Rejected";
-      let reason = "Activity criteria not met before trigger.";
-      if (!policyActive) reason = "Policy inactive.";
-      else if (!validBasisRisk) reason = "Basis risk checks failed.";
-      else if (manualReview) {
-        status = "Pending";
-        reason = "High fraud score; sent for manual review.";
-      } else if (eligibleByActivity) {
-        status = "Approved";
-        reason = "Auto-processed";
-      }
-
-      const claim = {
-        id: crypto.randomUUID(),
-        userId: user.id,
-        policyId: policy.id,
-        triggerType: type,
-        triggerSnapshot: payload,
-        claimWindowId: payload.id,
-        status,
-        payoutAmount: status === "Approved" ? payoutDetails.payout : 0,
-        estimatedLoss: payoutDetails.estimatedLoss,
-        hoursLost: payoutDetails.hoursLost,
-        fraudScore,
-        fraudStatus: manualReview ? "Under Review" : "Fraud Check Passed",
-        reason,
-        createdAt: now(),
-        processedAt: now(),
-        verificationReadyAt: new Date(Date.now() + payload.verificationBufferSeconds * 1000).toISOString()
-      };
-
-      db.claims.push(claim);
-      processedClaims.push(claim);
-    }
-
-    return {
-      trigger: payload,
-      processedClaims,
-      claimCount: processedClaims.length
+    const policy = {
+      id:           crypto.randomUUID(),
+      riderId:      userId,
+      riderName:    rider.name,
+      city:         rider.city,
+      platform:     rider.platform,
+      weeklyIncome: rider.weeklyIncome,
+      coverage:     rider.coverage,
+      premium:      rider.premium,
+      riskScore:    rider.riskScore,
+      status:       "active",
+      activatedAt:  nowIso(),
+      expiresAt:    new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
     };
+
+    db.policies.push(policy);
+    return { policy };
   });
 
-  return res.status(201).json(summary);
+  if (result.error) return res.status(400).json({ error: result.error, policy: result.policy || null });
+  res.status(201).json(result.policy);
 });
 
-app.get("/api/triggers/latest/:city", (req, res) => {
-  const { city } = req.params;
-  const db = readDB();
-  const latest = [...db.triggers]
-    .filter((t) => t.city.toLowerCase() === city.toLowerCase())
-    .sort((a, b) => (a.triggeredAt < b.triggeredAt ? 1 : -1))[0];
-  return res.json(latest ?? null);
-});
+// ═══════════════════════════════════════════════════════════════════════════════
+// GET ALL TRIGGERS
+// GET /api/triggers
+// ═══════════════════════════════════════════════════════════════════════════════
 
 app.get("/api/triggers", (_req, res) => {
   const db = readDB();
-  const triggers = [...db.triggers].sort((a, b) => (a.triggeredAt < b.triggeredAt ? 1 : -1));
-  return res.json(triggers);
+  res.json(db.triggers);
 });
 
-app.get("/api/claims", (req, res) => {
-  const { userId } = req.query;
+// ═══════════════════════════════════════════════════════════════════════════════
+// SIMULATE TRIGGER
+// POST /api/trigger/simulate
+// Body: { triggerType, value }
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.post("/api/trigger/simulate", (req, res) => {
+  const { triggerType, value } = req.body;
+  if (!triggerType) return res.status(400).json({ error: "triggerType is required." });
+
+  const result = updateDB((db) => {
+    const trigger = db.triggers.find((t) => t.type === triggerType);
+    if (!trigger) return null;
+
+    trigger.value           = Number(value ?? trigger.value);
+    trigger.active          = evaluateTrigger(trigger);
+    trigger.lastSimulatedAt = nowIso();
+    return { ...trigger };
+  });
+
+  if (!result) return res.status(404).json({ error: `Trigger type '${triggerType}' not found.` });
+  res.json(result);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RESET ALL TRIGGERS
+// POST /api/trigger/reset
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.post("/api/trigger/reset", (_req, res) => {
+  updateDB((db) => {
+    db.triggers.forEach((t) => {
+      t.active = false;
+      t.value  = t.type === "curfew" || t.type === "flood" ? 0 : 10;
+    });
+  });
   const db = readDB();
-  const claims = db.claims
-    .filter((c) => (userId ? c.userId === userId : true))
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-  return res.json(claims);
+  res.json({ message: "All triggers reset.", triggers: db.triggers });
 });
 
-app.get("/api/claims/:userId", (req, res) => {
+// ═══════════════════════════════════════════════════════════════════════════════
+// PROCESS CLAIM
+// POST /api/claim/process
+// Body: { userId }
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.post("/api/claim/process", (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: "userId is required." });
+
+  const result = updateDB((db) => {
+    const rider = db.riders.find((r) => r.id === userId);
+    if (!rider) return { error: "Rider not found." };
+
+    const policy = db.policies.find((p) => p.riderId === userId && p.status === "active");
+    if (!policy) return { error: "No active policy found. Please activate a policy first." };
+
+    const activeTriggers = db.triggers.filter((t) => t.active);
+    if (activeTriggers.length === 0) {
+      return { error: "No active environmental triggers detected. Claims require at least one active trigger." };
+    }
+
+    const claimResult = processClaimAutomation({ rider, policy, activeTriggers });
+
+    const claim = {
+      id:           crypto.randomUUID(),
+      riderId:      userId,
+      policyId:     policy.id,
+      riderName:    rider.name,
+      city:         rider.city,
+      triggers:     activeTriggers.map((t) => t.label),
+      incomeLoss:   claimResult.incomeLoss,
+      payoutAmount: claimResult.payoutAmount,
+      fraudScore:   claimResult.fraudScore,
+      status:       claimResult.status,
+      decision:     claimResult.decision,
+      processedAt:  nowIso()
+    };
+
+    db.claims.push(claim);
+
+    // Update rider behavioral profile
+    rider.claimsHistory.push({
+      claimId: claim.id,
+      amount:  claim.payoutAmount,
+      status:  claim.status,
+      date:    nowIso()
+    });
+
+    // Recalculate behavioral discount after each claim
+    const behavDiscount    = getBehavioralDiscount({ claimsHistory: rider.claimsHistory });
+    rider.behavioralDiscount = behavDiscount;
+    rider.premium            = Math.max(1, rider.basePremium - behavDiscount);
+
+    return claim;
+  });
+
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.status(201).json(result);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GET ALL CLAIMS (admin)
+// GET /api/claims
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get("/api/claims", (_req, res) => {
+  const db = readDB();
+  res.json(db.claims);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WORK RECOMMENDATION
+// GET /api/recommendation/:userId
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get("/api/recommendation/:userId", (req, res) => {
   const { userId } = req.params;
   const db = readDB();
-  const claims = db.claims.filter((c) => c.userId === userId).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-  return res.json(claims);
+
+  const rider = db.riders.find((r) => r.id === userId);
+  if (!rider) return res.status(404).json({ error: "Rider not found." });
+
+  res.json(getWorkRecommendation({ rider, triggers: db.triggers }));
 });
 
-app.get("/api/fraud/:userId", (req, res) => {
+// ═══════════════════════════════════════════════════════════════════════════════
+// ADAPTIVE COVERAGE
+// GET /api/coverage/:userId
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get("/api/coverage/:userId", (req, res) => {
   const { userId } = req.params;
   const db = readDB();
-  const claims = db.claims.filter((c) => c.userId === userId);
-  const latest = claims.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
 
-  return res.json({
-    userId,
-    latestFraudScore: latest?.fraudScore ?? 0,
-    status: latest?.fraudStatus ?? "Fraud Check Passed",
-    signalSummary:
-      latest?.fraudScore > 0.75
-        ? "Location/device/claim pattern anomaly detected."
-        : "No suspicious claim pattern detected."
-  });
+  const rider  = db.riders.find((r) => r.id === userId);
+  if (!rider) return res.status(404).json({ error: "Rider not found." });
+
+  const policy = db.policies.find((p) => p.riderId === userId && p.status === "active");
+  if (!policy) return res.status(404).json({ error: "No active policy found." });
+
+  res.json(getAdaptiveCoverage({ rider, policy, triggers: db.triggers }));
 });
 
-app.get("/api/fraud-check/:userId", (req, res) => {
-  const { userId } = req.params;
+// ═══════════════════════════════════════════════════════════════════════════════
+// ADMIN ANALYTICS
+// GET /api/admin/analytics
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get("/api/admin/analytics", (_req, res) => {
   const db = readDB();
-  const claims = db.claims.filter((c) => c.userId === userId);
-  const latest = claims.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
-  return res.json({
-    userId,
-    fraudScore: latest?.fraudScore ?? 0,
-    status: latest?.fraudStatus ?? "Fraud Check Passed",
-    signalSummary:
-      latest?.fraudScore > 0.75
-        ? "Location/device/claim pattern anomaly detected."
-        : "No suspicious claim pattern detected."
-  });
-});
-
-app.get("/api/admin/overview", (_req, res) => {
-  const db = readDB();
-  const approved = db.claims.filter((c) => c.status === "Approved");
-  const underReview = db.claims.filter((c) => c.status === "Pending");
-  const totalPayout = approved.reduce((sum, c) => sum + c.payoutAmount, 0);
-
-  return res.json({
-    totals: {
-      users: db.users.length,
-      activePolicies: db.policies.filter((p) => p.status === "Active").length,
-      claims: db.claims.length,
-      underReview: underReview.length,
-      totalPayout: Number(totalPayout.toFixed(2))
-    },
-    fraudAlerts: underReview.slice(0, 20),
-    riskHeatmap: db.users.map((u) => ({
-      city: u.city,
-      userId: u.id,
-      riskScore: db.policies.find((p) => p.userId === u.id)?.riskScore ?? 0
-    }))
-  });
-});
-
-app.get("/api/admin/stats", (_req, res) => {
-  const db = readDB();
-  const approved = db.claims.filter((c) => c.status === "Approved");
-  const underReview = db.claims.filter((c) => c.status === "Pending");
-  const totalPayout = approved.reduce((sum, c) => sum + c.payoutAmount, 0);
-
-  return res.json({
-    users: db.users.length,
-    activePolicies: db.policies.filter((p) => p.status === "Active").length,
-    totalClaims: db.claims.length,
-    underReview: underReview.length,
-    totalPayout: Number(totalPayout.toFixed(2))
-  });
-});
-
-app.get("/api/admin/risk-heatmap", (_req, res) => {
-  const db = readDB();
-  return res.json(
-    db.users.map((u) => ({
-      city: u.city,
-      zone: u.zone,
-      userId: u.id,
-      riskScore: db.policies.find((p) => p.userId === u.id)?.riskScore ?? 0
-    }))
-  );
+  res.json(buildAdminAnalytics({
+    riders:   db.riders,
+    policies: db.policies,
+    claims:   db.claims,
+    triggers: db.triggers
+  }));
 });
 
 export default app;

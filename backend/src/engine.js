@@ -1,267 +1,231 @@
-const DAY_ORDER = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+// ═══════════════════════════════════════════════════════════════════════════════
+// SurakshaPay AI Engine
+// Handles: risk scoring, premium calc, trigger eval, claim automation,
+//          fraud detection, behavioral discounts, work recommendations,
+//          adaptive coverage, and admin analytics.
+// ═══════════════════════════════════════════════════════════════════════════════
 
-const DAY_MULTIPLIERS = {
-  Sunday: 0.82,
-  Monday: 1.25,
-  Tuesday: 1.08,
-  Wednesday: 1.04,
-  Thursday: 1.12,
-  Friday: 1.18,
-  Saturday: 0.9
-};
+// ─── Constants ────────────────────────────────────────────────────────────────
+const HIGH_RISK_CITIES = ["Mumbai", "Chennai", "Kolkata", "Patna", "Bhopal", "Lucknow", "Ahmedabad"];
+const BASE_PREMIUM_RATE = 0.04; // 4% of weekly income base
 
-function clamp(min, value, max) {
-  return Math.max(min, Math.min(value, max));
+function clamp(min, val, max) {
+  return Math.max(min, Math.min(val, max));
 }
 
-function round(value, precision = 2) {
-  const factor = 10 ** precision;
-  return Math.round(value * factor) / factor;
+// ─── 1. Risk Score (0.0 – 1.0) ────────────────────────────────────────────────
+// Combines city exposure + income band + historical disruption weight
+export function calculateRiskScore({ city, weeklyIncome }) {
+  let score = 0.25; // baseline risk
+
+  // City-level weather / disruption exposure
+  if (HIGH_RISK_CITIES.includes(city)) score += 0.20;
+  else                                  score += 0.10;
+
+  // Income band: lower income → higher relative vulnerability
+  const income = Number(weeklyIncome);
+  if      (income < 3000)  score += 0.30;
+  else if (income < 5000)  score += 0.20;
+  else if (income < 8000)  score += 0.10;
+  else                     score += 0.05;
+
+  return parseFloat(clamp(0, score, 1).toFixed(3));
 }
 
-function average(values) {
-  if (!values.length) return 0;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+// ─── 2. Dynamic Premium Calculation ──────────────────────────────────────────
+// Formula: base_rate × weeklyIncome × (1 + riskScore)
+export function calculatePremium({ riskScore, weeklyIncome }) {
+  const income  = Number(weeklyIncome);
+  const premium = income * BASE_PREMIUM_RATE * (1 + riskScore);
+  return Math.round(premium);
 }
 
-export function getDayName(inputDate = new Date()) {
-  return DAY_ORDER[new Date(inputDate).getDay()];
+// ─── 3. Behavioral Discount / Surcharge (₹ amount) ───────────────────────────
+// Consistent, no-claim history → discount; repeated claims → surcharge
+export function getBehavioralDiscount({ claimsHistory = [] }) {
+  const count = claimsHistory.length;
+  if (count === 0) return 10;   // ₹10 discount — no claims ever
+  if (count === 1) return 5;    // ₹5 discount  — single claim, still good
+  if (count === 2) return 0;    // no change
+  if (count >= 3)  return -20;  // ₹20 surcharge — repeated claimant
+  return 0;
 }
 
-export function getDemandMultiplier(dayName, hour) {
-  const dayMultiplier = DAY_MULTIPLIERS[dayName] ?? 1;
-  let hourMultiplier = 1;
-
-  if (hour >= 10 && hour <= 12) hourMultiplier = 1.35;
-  else if (hour >= 15 && hour <= 17) hourMultiplier = 1.48;
-  else if (hour >= 8 && hour <= 9) hourMultiplier = 0.88;
-  else if (hour >= 18) hourMultiplier = 0.72;
-
-  return round(dayMultiplier * hourMultiplier, 3);
+// ─── 4. Trigger Evaluation ────────────────────────────────────────────────────
+// Returns true if the trigger threshold is crossed
+export function evaluateTrigger(trigger) {
+  return Number(trigger.value) >= Number(trigger.threshold);
 }
 
-export function getQueueLogs(trafficLogs, queueId, lastDays = 60) {
-  const cutoff = Date.now() - lastDays * 24 * 60 * 60 * 1000;
-  return trafficLogs.filter((log) => log.queueId === queueId && new Date(log.timestamp).getTime() >= cutoff);
-}
+// ─── 5. Fraud Scoring (0.0 – 1.0) ────────────────────────────────────────────
+// Combines: recent claim velocity + inactivity before trigger + weak trigger combo
+function computeFraudScore({ rider, activeTriggers }) {
+  let score = 0.05; // base
 
-export function predictWaitTime({ queue, tokens, trafficLogs, requestDate = new Date(), priority = 0 }) {
-  const date = new Date(requestDate);
-  const dayName = getDayName(date);
-  const hour = date.getHours();
+  // Velocity: claims within last 14 days
+  const now = Date.now();
+  const recentClaims = (rider.claimsHistory || []).filter((c) => {
+    const age = (now - new Date(c.date).getTime()) / 86400000;
+    return age <= 14;
+  });
+  if      (recentClaims.length >= 3) score += 0.50;
+  else if (recentClaims.length === 2) score += 0.30;
+  else if (recentClaims.length === 1) score += 0.15;
 
-  const waitingTokens = tokens.filter((token) => token.queueId === queue.id && token.status === "waiting");
-  const activeServing = tokens.filter((token) => token.queueId === queue.id && token.status === "serving").length;
+  // Inactivity signal: no recorded hours in last 3 days
+  const recentHours = (rider.hoursWorked || []).filter((h) => {
+    const age = (now - new Date(h.date).getTime()) / 86400000;
+    return age <= 3;
+  });
+  if (recentHours.length === 0) score += 0.25;
 
-  const baseQueueDelay = ((waitingTokens.length + 1) / Math.max(1, queue.counters)) * queue.avgServiceMinutes;
-  const demandMultiplier = getDemandMultiplier(dayName, hour);
-
-  const logs = getQueueLogs(trafficLogs, queue.id);
-  const historicalAtHour = logs.filter((log) => log.dayName === dayName && log.hour === hour).map((log) => log.avgWaitMinutes);
-  const baselineHistorical = logs.map((log) => log.avgWaitMinutes);
-
-  const historicalMultiplier =
-    baselineHistorical.length > 4
-      ? clamp(0.82, (average(historicalAtHour) || average(baselineHistorical)) / Math.max(1, average(baselineHistorical)), 1.55)
-      : 1;
-
-  const livePressure = 1 + activeServing * 0.05;
-  const priorityBoost = priority === 2 ? 0.76 : priority === 1 ? 0.88 : 1;
-
-  const predicted = clamp(3, Math.round(baseQueueDelay * demandMultiplier * historicalMultiplier * livePressure * priorityBoost), 240);
-
-  const confidenceFromHistory = clamp(0, logs.length / 300, 1);
-  const confidence = Math.round(62 + confidenceFromHistory * 28 + (priority > 0 ? 2 : 0));
-
-  return {
-    estimatedWaitMinutes: predicted,
-    confidence,
-    demandMultiplier,
-    factors: {
-      dayName,
-      hour,
-      waitingCount: waitingTokens.length,
-      activeServing,
-      counters: queue.counters,
-      avgServiceMinutes: queue.avgServiceMinutes,
-      historicalSampleSize: logs.length,
-      historicalMultiplier: round(historicalMultiplier, 3),
-      priority
-    }
-  };
-}
-
-export function generateTokenNumber(queueName, issuedCount) {
-  const prefix = queueName
-    .split(" ")
-    .map((piece) => piece[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 3)
-    .padEnd(3, "Q");
-
-  return `${prefix}-${String(issuedCount + 1).padStart(4, "0")}`;
-}
-
-export function getQueueInsights(queueId, trafficLogs) {
-  const logs = getQueueLogs(trafficLogs, queueId);
-  const byHour = new Map();
-  const byDay = new Map();
-
-  for (const log of logs) {
-    if (!byHour.has(log.hour)) byHour.set(log.hour, []);
-    byHour.get(log.hour).push(log.tokensIssued);
-
-    if (!byDay.has(log.dayName)) byDay.set(log.dayName, []);
-    byDay.get(log.dayName).push(log.tokensIssued);
+  // Weak trigger: only a temperature trigger with no secondary
+  if (activeTriggers.length === 1 && activeTriggers[0].type === "temperature") {
+    score += 0.10;
   }
 
-  const hourlyAverages = [...byHour.entries()].map(([hour, values]) => ({
-    hour,
-    avgTokens: round(average(values), 1)
-  }));
-
-  const dayAverages = [...byDay.entries()].map(([dayName, values]) => ({
-    dayName,
-    avgTokens: round(average(values), 1)
-  }));
-
-  const peakWindows = [...hourlyAverages]
-    .sort((a, b) => b.avgTokens - a.avgTokens)
-    .slice(0, 3)
-    .map((item) => ({
-      hour: item.hour,
-      label: `${item.hour}:00 - ${item.hour + 1}:00`,
-      avgTokens: item.avgTokens
-    }));
-
-  const bestVisitTimes = [...hourlyAverages]
-    .sort((a, b) => a.avgTokens - b.avgTokens)
-    .slice(0, 3)
-    .map((item) => `${item.hour}:00`);
-
-  const topDay = [...dayAverages].sort((a, b) => b.avgTokens - a.avgTokens)[0] ?? { dayName: "Monday", avgTokens: 0 };
-
-  return {
-    logsCount: logs.length,
-    peakWindows,
-    bestVisitTimes,
-    topDay,
-    hourlyAverages: hourlyAverages.sort((a, b) => a.hour - b.hour),
-    dayAverages: dayAverages.sort((a, b) => DAY_ORDER.indexOf(a.dayName) - DAY_ORDER.indexOf(b.dayName))
-  };
+  return parseFloat(clamp(0, score, 1).toFixed(3));
 }
 
-export function buildRecommendationCopy({ queue, queueInsights, waitForecastNow }) {
-  const peakWindow = queueInsights.peakWindows[0];
-  const secondaryPeakWindow = queueInsights.peakWindows[1];
+// ─── 6. Claim Automation ─────────────────────────────────────────────────────
+// Runs full parametric claim pipeline: validate → score → decide → payout
+export function processClaimAutomation({ rider, policy, activeTriggers }) {
+  const fraudScore = computeFraudScore({ rider, activeTriggers });
 
-  const peakSentence = peakWindow
-    ? `Aaj ${peakWindow.label} peak traffic hoga (${peakWindow.avgTokens} avg tokens/hour).`
-    : "Aaj medium traffic expected hai.";
+  // Income loss estimate: 25% per trigger, capped at 70% (moral hazard guard)
+  const lossFactor   = clamp(0.25, 0.25 + (activeTriggers.length - 1) * 0.10, 0.70);
+  const incomeLoss   = Math.round(rider.weeklyIncome * lossFactor);
+  const payoutAmount = Math.min(incomeLoss, policy.coverage);
 
-  const mondaySentence =
-    queueInsights.topDay.dayName === "Monday"
-      ? "Monday highest load day hai."
-      : `${queueInsights.topDay.dayName} highest load day hai.`;
-
-  const suggestion = queueInsights.bestVisitTimes.length
-    ? `Best time to visit: ${queueInsights.bestVisitTimes.join(", ")} (lower queue pressure).`
-    : "Best slot recommendation ke liye aur data collect ho raha hai.";
-
-  return {
-    queueId: queue.id,
-    queueName: queue.name,
-    predictedNowMinutes: waitForecastNow.estimatedWaitMinutes,
-    confidence: waitForecastNow.confidence,
-    keyAlerts: [
-      peakSentence,
-      mondaySentence,
-      suggestion,
-      secondaryPeakWindow ? `Secondary rush slot: ${secondaryPeakWindow.label}.` : ""
-    ].filter(Boolean)
-  };
-}
-
-export function buildAdminAnalytics({ queues, tokens, trafficLogs }) {
-  const waiting = tokens.filter((token) => token.status === "waiting").length;
-  const serving = tokens.filter((token) => token.status === "serving").length;
-  const completedToday = tokens.filter((token) => {
-    if (!token.completedAt) return false;
-    return new Date(token.completedAt).toDateString() === new Date().toDateString();
-  }).length;
-
-  const queueSnapshots = queues.map((queue) => {
-    const queueTokens = tokens.filter((token) => token.queueId === queue.id);
-    const queueWaiting = queueTokens.filter((token) => token.status === "waiting").length;
-    const queueServing = queueTokens.filter((token) => token.status === "serving").length;
-    const queueCompleted = queueTokens.filter((token) => token.status === "completed").length;
-
-    const waitValues = getQueueLogs(trafficLogs, queue.id, 21).map((log) => log.avgWaitMinutes);
-
+  if (fraudScore > 0.75) {
     return {
-      queueId: queue.id,
-      queueName: queue.name,
-      category: queue.category,
-      counters: queue.counters,
-      waiting: queueWaiting,
-      serving: queueServing,
-      completed: queueCompleted,
-      avgRecentWait: round(average(waitValues), 1)
+      fraudScore,
+      incomeLoss,
+      payoutAmount: 0,
+      status:   "manual_review",
+      decision: `⚠️ Fraud score ${fraudScore} exceeds threshold. Claim flagged for manual review.`
     };
-  });
+  }
 
-  const dayLoad = DAY_ORDER.map((dayName) => {
-    const entries = trafficLogs.filter((log) => log.dayName === dayName).map((log) => log.tokensIssued);
-    return { dayName, avgTokens: round(average(entries), 1) };
-  });
+  return {
+    fraudScore,
+    incomeLoss,
+    payoutAmount,
+    status:   "approved",
+    decision: `✅ Auto-approved. Payout of ₹${payoutAmount} scheduled within 24 hours.`
+  };
+}
 
-  const hourlyLoad = Array.from({ length: 12 }, (_, index) => index + 8).map((hour) => {
-    const entries = trafficLogs.filter((log) => log.hour === hour).map((log) => log.tokensIssued);
-    return { hour, avgTokens: round(average(entries), 1) };
-  });
+// ─── 7. Work Time Recommendation ─────────────────────────────────────────────
+// AI-driven slot suggestions based on active triggers + time of day
+export function getWorkRecommendation({ rider, triggers }) {
+  const activeTriggers = (triggers || []).filter((t) => t.active);
+  const hour = new Date().getHours();
+
+  if (activeTriggers.length > 0) {
+    return {
+      recommendation: "🚨 Environmental disruption active. Avoid working until conditions clear.",
+      riskLevel:      "high",
+      bestSlot:       "Re-check in 2–3 hours once trigger conditions normalise.",
+      activeTriggers: activeTriggers.map((t) => t.label)
+    };
+  }
+
+  // Prime earning windows
+  const isMorningPeak = hour >= 6  && hour <= 9;
+  const isEveningPeak = hour >= 18 && hour <= 21;
+  const isMidday      = hour >= 12 && hour <= 16;
+
+  if (isMorningPeak || isEveningPeak) {
+    return {
+      recommendation: "✅ Excellent conditions — low risk, high demand window active now.",
+      riskLevel:      "low",
+      bestSlot:       `${hour}:00–${hour + 3}:00 is an optimal earning slot.`,
+      activeTriggers: []
+    };
+  }
+
+  if (isMidday) {
+    return {
+      recommendation: "⚠️ Midday: lower order volume and elevated heat exposure.",
+      riskLevel:      "medium",
+      bestSlot:       "Consider the 6–9 PM window for safer, higher-demand conditions.",
+      activeTriggers: []
+    };
+  }
+
+  return {
+    recommendation: "📊 Conditions are stable. No environmental alerts detected.",
+    riskLevel:      "low",
+    bestSlot:       "Tomorrow 6–10 PM predicted as low-risk, high-demand window.",
+    activeTriggers: []
+  };
+}
+
+// ─── 8. Adaptive Coverage Engine ─────────────────────────────────────────────
+// Dynamically adjusts coverage & premium based on real-time trigger conditions
+export function getAdaptiveCoverage({ rider, policy, triggers }) {
+  const activeTriggers = (triggers || []).filter((t) => t.active);
+  let coverage = policy.coverage;
+  let premium  = policy.premium;
+  let note     = "Coverage is at standard level. No active triggers.";
+
+  const hasRainOrFlood = activeTriggers.some((t) => ["rainfall", "flood"].includes(t.type));
+  const hasAQI         = activeTriggers.some((t) => t.type === "aqi");
+  const hasHeat        = activeTriggers.some((t) => t.type === "temperature");
+
+  if (hasRainOrFlood) {
+    coverage = Math.round(coverage * 1.15);
+    premium  = Math.round(premium  * 1.05);
+    note     = "🌧️ Rain/flood detected — coverage +15%, premium adjusted +5% for sustainability.";
+  } else if (hasAQI) {
+    coverage = Math.round(coverage * 1.10);
+    note     = "😷 High AQI — coverage +10%. Stay safe.";
+  } else if (hasHeat) {
+    coverage = Math.round(coverage * 1.08);
+    note     = "🥵 Heatwave alert — coverage +8%. Limit outdoor hours.";
+  }
+
+  return {
+    coverage,
+    premium,
+    note,
+    activeTriggers: activeTriggers.map((t) => t.label)
+  };
+}
+
+// ─── 9. Admin Analytics ───────────────────────────────────────────────────────
+export function buildAdminAnalytics({ riders, policies, claims, triggers }) {
+  const activePolicies  = policies.filter((p) => p.status === "active").length;
+  const totalClaims     = claims.length;
+  const approvedClaims  = claims.filter((c) => c.status === "approved").length;
+  const manualReviews   = claims.filter((c) => c.status === "manual_review").length;
+  const rejectedClaims  = claims.filter((c) => c.status === "rejected").length;
+  const totalPayout     = claims
+    .filter((c) => c.status === "approved")
+    .reduce((sum, c) => sum + (c.payoutAmount || 0), 0);
+
+  const avgRiskScore = riders.length > 0
+    ? parseFloat((riders.reduce((s, r) => s + r.riskScore, 0) / riders.length).toFixed(3))
+    : 0;
+
+  const activeTriggers = (triggers || []).filter((t) => t.active).map((t) => t.label);
 
   return {
     summary: {
-      totalQueues: queues.length,
-      waiting,
-      serving,
-      completedToday,
-      activeUsersToday: new Set(tokens.map((token) => token.phone || token.customerName)).size
+      totalRiders:     riders.length,
+      activePolicies,
+      totalClaims,
+      approvedClaims,
+      manualReviews,
+      rejectedClaims,
+      totalPayout,
+      avgRiskScore,
+      fraudDetectionRate: totalClaims > 0
+        ? `${((manualReviews / totalClaims) * 100).toFixed(1)}%`
+        : "0%"
     },
-    queueSnapshots,
-    dayLoad,
-    hourlyLoad
+    activeTriggers,
+    recentClaims: claims.slice(-5).reverse()
   };
-}
-
-export function createSyntheticHistoryForQueue(queue, daysBack = 70) {
-  const records = [];
-
-  for (let dayOffset = 0; dayOffset < daysBack; dayOffset += 1) {
-    for (let hour = 8; hour <= 19; hour += 1) {
-      const stamp = new Date();
-      stamp.setHours(hour, 0, 0, 0);
-      stamp.setDate(stamp.getDate() - dayOffset);
-
-      const dayName = getDayName(stamp);
-      const multiplier = getDemandMultiplier(dayName, hour);
-      const randomness = 0.88 + Math.random() * 0.3;
-
-      const tokensIssued = Math.max(6, Math.round(queue.baseTraffic * multiplier * randomness));
-      const avgWaitMinutes = Math.max(4, Math.round((tokensIssued / Math.max(1, queue.counters)) * (queue.avgServiceMinutes * 0.65)));
-
-      records.push({
-        id: `${queue.id}-${stamp.getTime()}`,
-        queueId: queue.id,
-        timestamp: stamp.toISOString(),
-        dayName,
-        hour,
-        tokensIssued,
-        avgWaitMinutes
-      });
-    }
-  }
-
-  return records;
 }
